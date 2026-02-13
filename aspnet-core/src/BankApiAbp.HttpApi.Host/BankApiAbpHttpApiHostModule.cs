@@ -30,6 +30,7 @@ using Volo.Abp.Swashbuckle;
 using Volo.Abp.UI.Navigation.Urls;
 using Volo.Abp.VirtualFileSystem;
 using OpenIddict.Abstractions;
+using Volo.Abp.AspNetCore.Mvc.AntiForgery;
 
 
 namespace BankApiAbp;
@@ -76,6 +77,10 @@ public class BankApiAbpHttpApiHostModule : AbpModule
         {
             builder.AddDevelopmentEncryptionCertificate()
                    .AddDevelopmentSigningCertificate();
+        });
+        Configure<AbpAntiForgeryOptions>(options =>
+        {
+            options.AutoValidate = false;
         });
 
     }

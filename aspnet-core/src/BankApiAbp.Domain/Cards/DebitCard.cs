@@ -5,12 +5,11 @@ namespace BankApiAbp.Cards;
 
 public class DebitCard : FullAuditedAggregateRoot<Guid>
 {
-    public string CardNo { get; private set; } = null!;
-    public DateTime ExpireAt { get; private set; }
-    public string Cvv { get; private set; } = null!;
-    public bool IsActive { get; private set; } = true;
-
     public Guid AccountId { get; private set; }
+    public string CardNo { get; private set; } = default!;
+    public DateTime ExpireAt { get; private set; }
+    public string Cvv { get; private set; } = default!;
+    public bool IsActive { get; private set; } = true;
 
     private DebitCard() { }
 
@@ -18,30 +17,12 @@ public class DebitCard : FullAuditedAggregateRoot<Guid>
         : base(id)
     {
         AccountId = accountId;
-        SetCardNo(cardNo);
+        CardNo = cardNo;
         ExpireAt = expireAt;
-        SetCvv(cvv);
+        Cvv = cvv;
         IsActive = true;
     }
 
-    public void SetCardNo(string cardNo)
-    {
-        if (string.IsNullOrWhiteSpace(cardNo)) throw new ArgumentException("CardNo required.");
-        CardNo = cardNo.Trim();
-    }
-
-    public void SetCvv(string cvv)
-    {
-        if (string.IsNullOrWhiteSpace(cvv)) throw new ArgumentException("CVV required.");
-        Cvv = cvv.Trim();
-    }
-
-    public void Activate() => IsActive = true;
     public void Deactivate() => IsActive = false;
-
-    public void EnsureUsable()
-    {
-        if (!IsActive) throw new InvalidOperationException("Debit card is not active.");
-        if (ExpireAt.Date < DateTime.UtcNow.Date) throw new InvalidOperationException("Debit card expired.");
-    }
+    public void Activate() => IsActive = true;
 }
