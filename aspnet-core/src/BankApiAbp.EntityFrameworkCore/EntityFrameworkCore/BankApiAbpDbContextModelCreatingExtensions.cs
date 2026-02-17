@@ -57,6 +57,7 @@ public static class BankApiAbpDbContextModelCreatingExtensions
 
             b.Property(x => x.CardNo).IsRequired().HasMaxLength(16);
             b.Property(x => x.CvvHash).IsRequired().HasMaxLength(500);
+            
 
             b.HasIndex(x => x.CardNo).IsUnique();
 

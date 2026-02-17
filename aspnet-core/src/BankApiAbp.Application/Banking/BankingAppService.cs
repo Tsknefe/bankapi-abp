@@ -157,14 +157,32 @@ public class BankingAppService : ApplicationService, IBankingAppService
         var card = await _debitCards.FirstOrDefaultAsync(x => x.CardNo == input.CardNo);
         if (card == null) throw new EntityNotFoundException(typeof(DebitCard), input.CardNo);
 
-        if (!card.IsActive)
-            throw new UserFriendlyException("Card is not active.");
+       /* if (!card.IsActive)
+            throw new UserFriendlyException("Card is not active.");*/
 
         var now = Clock.Now;
         card.EnsureUsable(now);
         card.VerifyCvv(input.Cvv);
 
         var account = await _accounts.GetAsync(card.AccountId);
+
+        var start = now.Date;
+        var end = start.AddDays(1);
+
+        var spentToday = await AsyncExecuter.SumAsync(
+            (await _tx.GetQueryableAsync())
+            .Where(t => t.DebitCardId == card.Id
+            && t.TxType == TransactionType.DebitCardSpend
+            && t.CreationTime >= start
+            && t.CreationTime < end),
+            t => (decimal?)t.Amount) ?? 0m;
+
+        if (spentToday + input.Amount > card.DailyLimit)
+        {
+            throw new UserFriendlyException(
+                $"Daily Limit exceeded. Limit={card.DailyLimit}, SpentToday={spentToday}, Amount={input.Amount}");
+        }
+
         account.Withdraw(input.Amount);
 
         await _accounts.UpdateAsync(account, autoSave: true);
@@ -183,7 +201,12 @@ public class BankingAppService : ApplicationService, IBankingAppService
     public async Task CreditCardSpendAsync(CardSpendDto input)
     {
         var card = await _creditCards.FirstOrDefaultAsync(x => x.CardNo == input.CardNo);
-        if (card == null) throw new UserFriendlyException("Credit card not found.");
+
+        var now = Clock.Now;
+        card.EnsureUsable(now);
+        card.VerifyCvv(input.Cvv);
+
+        //if (card == null) throw new UserFriendlyException("Credit card not found.");
 
         card.Spend(input.Amount);
 
@@ -309,6 +332,6 @@ public class BankingAppService : ApplicationService, IBankingAppService
 
 
     }
-  
+
 
 }

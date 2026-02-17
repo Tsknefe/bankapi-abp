@@ -1,4 +1,5 @@
 ﻿using System;
+using Volo.Abp;
 using Volo.Abp.Domain.Entities.Auditing;
 
 namespace BankApiAbp.Cards;
@@ -43,4 +44,17 @@ public class CreditCard : FullAuditedAggregateRoot<Guid>
     
     public void Deactivate() => IsActive = false;   
     public void Activate() => IsActive = true;
+
+    public void EnsureUsable(DateTime now)
+    {
+        if (!IsActive) throw new BusinessException("Credit Card Not Active");
+        if (ExpireAt < now) throw new BusinessException("Credit Card Expired");
+    }
+
+    public void VerifyCvv(string cvv)
+    {
+        if (string.IsNullOrWhiteSpace(cvv)) throw new BusinessException("Cvv Required");
+        if (cvv.Length < 3 || cvv.Length > 4) throw new BusinessException("Cvv Invalid");
+        if (Cvv != cvv) throw new BusinessException("Credit Card Invalid Cvv");
+    }
 }
