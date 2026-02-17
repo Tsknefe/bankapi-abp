@@ -1,10 +1,12 @@
 ﻿using System;
+using System.Linq;
 using System.Threading.Tasks;
 using BankApiAbp.Banking.Dtos;
 using BankApiAbp.Cards;
 using BankApiAbp.Entities;
 using BankApiAbp.Transactions;
 using Volo.Abp;
+using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
 using Volo.Abp.Domain.Entities;
 using Volo.Abp.Domain.Repositories;
@@ -13,14 +15,14 @@ namespace BankApiAbp.Banking;
 
 public class BankingAppService : ApplicationService, IBankingAppService
 {
-    private readonly IRepository<Customer,Guid> _customers;
+    private readonly IRepository<Customer, Guid> _customers;
     private readonly IRepository<Account, Guid> _accounts;
     private readonly IRepository<DebitCard, Guid> _debitCards;
     private readonly IRepository<CreditCard, Guid> _creditCards;
     private readonly IRepository<Transaction, Guid> _tx;
 
     public BankingAppService(
-        IRepository<Customer,Guid> customers,
+        IRepository<Customer, Guid> customers,
         IRepository<Account, Guid> accounts,
         IRepository<DebitCard, Guid> debitCards,
         IRepository<CreditCard, Guid> creditCards,
@@ -158,6 +160,10 @@ public class BankingAppService : ApplicationService, IBankingAppService
         if (!card.IsActive)
             throw new UserFriendlyException("Card is not active.");
 
+        var now = Clock.Now;
+        card.EnsureUsable(now);
+        card.VerifyCvv(input.Cvv);
+
         var account = await _accounts.GetAsync(card.AccountId);
         account.Withdraw(input.Amount);
 
@@ -226,10 +232,83 @@ public class BankingAppService : ApplicationService, IBankingAppService
             TransactionType.CreditCardPayment,
             input.Amount,
             input.Description,
-            account.Id,   
+            account.Id,
             null,
             card.Id
         ), autoSave: true);
     }
+    public async Task<AccountDto> GetAccountAsync(Guid id)
+    {
+        var acc = await _accounts.GetAsync(id);
+
+        return new AccountDto
+        {
+            Id = acc.Id,
+            CustomerId = acc.CustomerId,
+            Name = acc.Name,
+            Iban = acc.Iban,
+            Balance = acc.Balance,
+            AccountType = acc.AccountType,
+            IsActive = acc.IsActive,
+        };
+    }
+    public async Task<CreditCardDto> GetCreditCardDto(string cardNo)
+    {
+        var card = await _creditCards.FirstOrDefaultAsync(x => x.CardNo == cardNo);
+        if (card == null)
+            throw new UserFriendlyException("Credit card not found");
+        return new CreditCardDto
+        {
+            Id = card.Id,
+            CustomerId = card.CustomerId,
+            CardNo = card.CardNo,
+            ExpireAt = card.ExpireAt,
+            Limit = card.Limit,
+            CurrentDebt = card.CurrentDebt,
+            IsActive = card.IsActive
+        };
+    }
+    public async Task<PagedResultDto<TransactionDto>> GetTransactionsAsync(GetTransactionsInput input)
+    {
+        var queryable = await _tx.GetQueryableAsync();
+        var q = queryable.AsQueryable();
+
+        if (input.AccountId.HasValue)
+            q = q.Where(x => x.AccountId == input.AccountId);
+
+        if (input.DebitCardId.HasValue)
+            q = q.Where(x => x.DebitCardId == input.DebitCardId);
+
+        if (input.CreditCardId.HasValue)
+            q = q.Where(x => x.CreditCardId == input.CreditCardId);
+
+        if (input.From.HasValue)
+            q = q.Where(x => x.CreationTime >= input.From.Value);
+
+        if (input.To.HasValue)
+            q = q.Where(x => x.CreationTime <= input.To.Value);
+
+        var total = await AsyncExecuter.CountAsync(q);
+        q = q.OrderByDescending(x => x.CreationTime);
+
+        var items = await AsyncExecuter.ToListAsync(
+            q.Skip(input.SkipCount).Take(input.MaxResultCount));
+        return new PagedResultDto<TransactionDto>(
+            total,
+            items.Select(t => new TransactionDto
+            {
+                Id = t.Id,
+                TxType = t.TxType,
+                Amount = t.Amount,
+                Description = t.Description,
+                CreationTime = t.CreationTime,
+                AccountId = t.AccountId,
+                DebitCardId = t.DebitCardId,
+                CreditCardId = t.CreditCardId
+            }).ToList());
+
+
+    }
+  
 
 }
