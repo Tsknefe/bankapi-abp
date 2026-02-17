@@ -11,6 +11,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\BankApiAbp.EntityFrameworkCore\BankApiAbp.EntityFrameworkCore.csproj" />
     <ProjectReference Include="..\BankApiAbp.Application.Tests\BankApiAbp.Application.Tests.csproj" />
+    <PackageReference Include="BCrypt.Net-Next" Version="4.1.0" />
     <PackageReference Include="Volo.Abp.EntityFrameworkCore.Sqlite" Version="9.0.0" />
   </ItemGroup>
 

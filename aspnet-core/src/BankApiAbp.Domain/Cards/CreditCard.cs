@@ -41,6 +41,6 @@ public class CreditCard : FullAuditedAggregateRoot<Guid>
         CurrentDebt -= amount;
     }
     
-    public void Deactivate() => IsActive = false;
+    public void Deactivate() => IsActive = false;   
     public void Activate() => IsActive = true;
 }
