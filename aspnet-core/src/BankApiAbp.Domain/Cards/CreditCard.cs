@@ -1,4 +1,5 @@
 ﻿using System;
+using System.ComponentModel.DataAnnotations;
 using Volo.Abp;
 using Volo.Abp.Domain.Entities.Auditing;
 
@@ -14,6 +15,9 @@ public class CreditCard : FullAuditedAggregateRoot<Guid>
     public decimal CurrentDebt { get; private set; }
     public bool IsActive { get; private set; } = true;
 
+    [Timestamp]
+    public byte[] RowVersion { get; private set; } = default!;
+
     private CreditCard() { }
 
     public CreditCard(Guid id, Guid customerId, string cardNo, DateTime expireAt, string cvv, decimal limit)
@@ -27,9 +31,11 @@ public class CreditCard : FullAuditedAggregateRoot<Guid>
         CurrentDebt = 0;
         IsActive = true;
     }
+
     public void Spend(decimal amount)
     {
         if (amount <= 0) throw new ArgumentException("Amount must be > 0");
+        if (!IsActive) throw new InvalidOperationException("Card is not active");
         if ((CurrentDebt + amount) > Limit) throw new InvalidOperationException("Limit exceeded");
         CurrentDebt += amount;
     }
@@ -40,21 +46,21 @@ public class CreditCard : FullAuditedAggregateRoot<Guid>
         if (amount > CurrentDebt) amount = CurrentDebt;
         CurrentDebt -= amount;
     }
-    
-    public void Deactivate() => IsActive = false;   
+
+    public void Deactivate() => IsActive = false;
     public void Activate() => IsActive = true;
 
     public void EnsureUsable(DateTime now)
     {
-        if (!IsActive) throw new BusinessException("Credit Card Not Active");
-        if (ExpireAt < now) throw new BusinessException("Credit Card Expired");
+        if (!IsActive) throw new BusinessException("CreditCardNotActive");
+        if (ExpireAt < now) throw new BusinessException("CreditCardExpired");
     }
 
     public void VerifyCvv(string cvv)
     {
-        if (string.IsNullOrWhiteSpace(cvv)) throw new BusinessException("Cvv Required");
-        if (cvv.Length < 3 || cvv.Length > 4) throw new BusinessException("Cvv Invalid");
+        if (string.IsNullOrWhiteSpace(cvv)) throw new BusinessException("CvvRequired");
+        if (cvv.Length < 3 || cvv.Length > 4) throw new BusinessException("CvvInvalid");
         if (!BCrypt.Net.BCrypt.Verify(cvv, CvvHash))
-            throw new BusinessException("Credit Card Invalid Cvv");
+            throw new BusinessException("CreditCardInvalidCvv");
     }
 }

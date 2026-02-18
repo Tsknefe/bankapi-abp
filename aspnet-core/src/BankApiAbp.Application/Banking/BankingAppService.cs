@@ -8,8 +8,10 @@ using BankApiAbp.Transactions;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Application.Services;
+using Volo.Abp.Authorization;
 using Volo.Abp.Domain.Entities;
 using Volo.Abp.Domain.Repositories;
+using Volo.Abp.Users;
 
 namespace BankApiAbp.Banking;
 
@@ -36,12 +38,16 @@ public class BankingAppService : ApplicationService, IBankingAppService
     }
     public async Task<IdResponseDto> CreateCustomerAsync(CreateCustomerDto input)
     {
-        var existing = await _customers.FirstOrDefaultAsync(x => x.TcNo == input.TcNo);
+
+        var userId = CurrentUserIdOrThrow();
+        var existing = await _customers.FirstOrDefaultAsync(x => x.TcNo == input.TcNo && x.UserId == userId);
+
         if (existing != null)
             throw new UserFriendlyException("This customer already exists with TcNo");
 
         var customer = new Customer(
             GuidGenerator.Create(),
+            userId,
             input.Name,
             input.TcNo,
             input.BirthDate,
@@ -54,12 +60,22 @@ public class BankingAppService : ApplicationService, IBankingAppService
 
     public async Task<IdResponseDto> CreateAccountAsync(CreateAccountDto input)
     {
-        var customer = await _customers.FindAsync(input.CustomerId);
-        if (customer == null) throw new UserFriendlyException("Müşteri bulunamadı.");
+        var userId = CurrentUserIdOrThrow();
 
-        var existingIban = await _accounts.FirstOrDefaultAsync(x => x.Iban == input.Iban);
-        if (existingIban != null)
-            throw new UserFriendlyException("Bu IBAN zaten var.");
+        var customer = await GetCustomerOwnedAsync(input.CustomerId);
+
+        var accountsQ = await _accounts.GetQueryableAsync();
+        var customersQ = await _customers.GetQueryableAsync();
+
+        var ibanExistsForUser = await AsyncExecuter.AnyAsync(
+       from a in accountsQ
+       join c in customersQ on a.CustomerId equals c.Id
+       where c.UserId == userId && a.Iban == input.Iban
+       select a.Id
+   );
+
+        if (ibanExistsForUser)
+            throw new UserFriendlyException("Bu IBAN zaten mevcut ");
 
         var account = new Account(
             GuidGenerator.Create(),
@@ -74,17 +90,30 @@ public class BankingAppService : ApplicationService, IBankingAppService
     }
     public async Task<IdResponseDto> CreateDebitCardAsync(CreateDebitCardDto input)
     {
-        var acc = await _accounts.FindAsync(input.AccountId);
-        if (acc == null) throw new UserFriendlyException("Hesap bulunamadı.");
+        var userId = CurrentUserIdOrThrow();
 
-        var existing = await _debitCards.FirstOrDefaultAsync(x => x.CardNo == input.CardNo);
-        if (existing != null)
-            throw new UserFriendlyException("Bu kart numarası zaten var.");
+        var cardNo = NormalizeCardNo(input.CardNo);
+        var acc = await GetAccountOwnedAsync(input.AccountId);
+
+        var debitCardsQ = await _debitCards.GetQueryableAsync();
+        var accountsQ = await _accounts.GetQueryableAsync();
+        var customersQ = await _customers.GetQueryableAsync();
+
+        var cardExistsForUser = await AsyncExecuter.AnyAsync(
+            from dc in debitCardsQ
+            join a in accountsQ on dc.AccountId equals a.Id
+            join c in customersQ on a.CustomerId equals c.Id
+            where c.UserId == userId && dc.CardNo == cardNo
+            select dc.Id
+        );
+
+        if (cardExistsForUser)
+            throw new UserFriendlyException("Bu debit kart numarası zaten mevcut.");
 
         var card = new DebitCard(
             GuidGenerator.Create(),
             input.AccountId,
-            input.CardNo,
+            cardNo,
             input.ExpireAt,
             input.Cvv
         );
@@ -92,19 +121,31 @@ public class BankingAppService : ApplicationService, IBankingAppService
         await _debitCards.InsertAsync(card, autoSave: true);
         return new IdResponseDto { Id = card.Id };
     }
+
     public async Task<IdResponseDto> CreateCreditCardAsync(CreateCreditCardDto input)
     {
-        var cust = await _customers.FindAsync(input.CustomerId);
-        if (cust == null) throw new UserFriendlyException("Müşteri bulunamadı.");
+        var userId = CurrentUserIdOrThrow();
 
-        var existing = await _creditCards.FirstOrDefaultAsync(x => x.CardNo == input.CardNo);
-        if (existing != null)
-            throw new UserFriendlyException("Bu kart numarası zaten var.");
+        var cardNo = NormalizeCardNo(input.CardNo);
+        var cust = await GetCustomerOwnedAsync(input.CustomerId);
+
+        var creditCardsQ = await _creditCards.GetQueryableAsync();
+        var customersQ = await _customers.GetQueryableAsync();
+
+        var cardExistsForUser = await AsyncExecuter.AnyAsync(
+            from cc in creditCardsQ
+            join c in customersQ on cc.CustomerId equals c.Id
+            where c.UserId == userId && cc.CardNo == cardNo
+            select cc.Id
+        );
+
+        if (cardExistsForUser)
+            throw new UserFriendlyException("Bu kredi kart numarası zaten mevcut.");
 
         var card = new CreditCard(
             GuidGenerator.Create(),
             input.CustomerId,
-            input.CardNo,
+            cardNo,
             input.ExpireAt,
             input.Cvv,
             input.Limit
@@ -115,10 +156,9 @@ public class BankingAppService : ApplicationService, IBankingAppService
     }
 
 
-
     public async Task DepositAsync(DepositDto input)
     {
-        var account = await _accounts.GetAsync(input.AccountId);
+        var account = await GetAccountOwnedAsync(input.AccountId);
         account.Deposit(input.Amount);
 
         await _accounts.UpdateAsync(account, autoSave: true);
@@ -136,7 +176,7 @@ public class BankingAppService : ApplicationService, IBankingAppService
 
     public async Task WithdrawAsync(WithdrawDto input)
     {
-        var account = await _accounts.GetAsync(input.AccountId);
+        var account = await GetAccountOwnedAsync(input.AccountId);
         account.Withdraw(input.Amount);
 
         await _accounts.UpdateAsync(account, autoSave: true);
@@ -154,17 +194,18 @@ public class BankingAppService : ApplicationService, IBankingAppService
 
     public async Task DebitCardSpendAsync(CardSpendDto input)
     {
-        var card = await _debitCards.FirstOrDefaultAsync(x => x.CardNo == input.CardNo);
+        var cardNo = NormalizeCardNo(input.CardNo);
+        var card = await GetDebitCardOwnedByCardNoAsync(cardNo);
         if (card == null) throw new EntityNotFoundException(typeof(DebitCard), input.CardNo);
 
-       /* if (!card.IsActive)
-            throw new UserFriendlyException("Card is not active.");*/
+        /* if (!card.IsActive)
+             throw new UserFriendlyException("Card is not active.");*/
 
         var now = Clock.Now;
         card.EnsureUsable(now);
         card.VerifyCvv(input.Cvv);
 
-        var account = await _accounts.GetAsync(card.AccountId);
+        var account = await GetAccountOwnedAsync(card.AccountId);
 
         var start = now.Date;
         var end = start.AddDays(1);
@@ -200,9 +241,8 @@ public class BankingAppService : ApplicationService, IBankingAppService
 
     public async Task CreditCardSpendAsync(CardSpendDto input)
     {
-        input.CardNo = NormalizeCardNo(input.CardNo);
-
-        var card = await _creditCards.FirstOrDefaultAsync(x => x.CardNo == input.CardNo);
+        var cardNo = NormalizeCardNo(input.CardNo);
+        var card = await GetCreditCardOwnedByCardNoAsync(cardNo);
         if (card == null)
             throw new UserFriendlyException("Credit card not found.");
 
@@ -229,9 +269,8 @@ public class BankingAppService : ApplicationService, IBankingAppService
         if (input.Amount <= 0)
             throw new BusinessException("Amount must be greater than zero");
 
-        input.CardNo = NormalizeCardNo(input.CardNo);
-
-        var card = await _creditCards.FirstOrDefaultAsync(x => x.CardNo == input.CardNo);
+        var cardNo = NormalizeCardNo(input.CardNo);
+        var card = await GetCreditCardOwnedByCardNoAsync(cardNo);
         if (card is null)
             throw new BusinessException("CreditCardNotFound")
                 .WithData("CardNo", input.CardNo);
@@ -240,7 +279,7 @@ public class BankingAppService : ApplicationService, IBankingAppService
         card.EnsureUsable(now);
         card.VerifyCvv(input.Cvv);
 
-        var account = await _accounts.GetAsync(input.AccountId);
+        var account = await GetAccountOwnedAsync(input.AccountId);
 
         if (!account.IsActive)
             throw new UserFriendlyException("Hesap aktif değil.");
@@ -273,7 +312,7 @@ public class BankingAppService : ApplicationService, IBankingAppService
     }
     public async Task<AccountDto> GetAccountAsync(Guid id)
     {
-        var acc = await _accounts.GetAsync(id);
+        var acc = await GetAccountOwnedAsync(id);
 
         return new AccountDto
         {
@@ -288,7 +327,10 @@ public class BankingAppService : ApplicationService, IBankingAppService
     }
     public async Task<CreditCardDto> GetCreditCardDto(string cardNo)
     {
-        var card = await _creditCards.FirstOrDefaultAsync(x => x.CardNo == cardNo);
+
+        cardNo = NormalizeCardNo(cardNo);
+        var card = await GetCreditCardOwnedByCardNoAsync(cardNo);
+
         if (card == null)
             throw new UserFriendlyException("Credit card not found");
         return new CreditCardDto
@@ -304,8 +346,43 @@ public class BankingAppService : ApplicationService, IBankingAppService
     }
     public async Task<PagedResultDto<TransactionDto>> GetTransactionsAsync(GetTransactionsInput input)
     {
-        var queryable = await _tx.GetQueryableAsync();
-        var q = queryable.AsQueryable();
+        var userId = CurrentUserIdOrThrow();
+
+        var txQ = await _tx.GetQueryableAsync();
+        var accountsQ = await _accounts.GetQueryableAsync();
+        var customersQ = await _customers.GetQueryableAsync();
+        var debitCardsQ = await _debitCards.GetQueryableAsync();
+        var creditCardsQ = await _creditCards.GetQueryableAsync();
+
+        var baseQ =
+            from t in txQ
+
+            join a in accountsQ on t.AccountId equals a.Id into aJoin
+            from a in aJoin.DefaultIfEmpty()
+            join cA in customersQ on a.CustomerId equals cA.Id into cAJoin
+            from cA in cAJoin.DefaultIfEmpty()
+
+            join dc in debitCardsQ on t.DebitCardId equals dc.Id into dcJoin
+            from dc in dcJoin.DefaultIfEmpty()
+            join aDc in accountsQ on dc.AccountId equals aDc.Id into aDcJoin
+            from aDc in aDcJoin.DefaultIfEmpty()
+            join cDc in customersQ on aDc.CustomerId equals cDc.Id into cDcJoin
+            from cDc in cDcJoin.DefaultIfEmpty()
+
+            join cc in creditCardsQ on t.CreditCardId equals cc.Id into ccJoin
+            from cc in ccJoin.DefaultIfEmpty()
+            join cC in customersQ on cc.CustomerId equals cC.Id into cCJoin
+            from cC in cCJoin.DefaultIfEmpty()
+
+            let ownerUserId =
+                t.AccountId != null ? cA.UserId :
+                t.DebitCardId != null ? cDc.UserId :
+                cC.UserId
+
+            where ownerUserId == userId
+            select t;
+
+        var q = baseQ;
 
         if (input.AccountId.HasValue)
             q = q.Where(x => x.AccountId == input.AccountId);
@@ -323,10 +400,12 @@ public class BankingAppService : ApplicationService, IBankingAppService
             q = q.Where(x => x.CreationTime <= input.To.Value);
 
         var total = await AsyncExecuter.CountAsync(q);
+
         q = q.OrderByDescending(x => x.CreationTime);
 
         var items = await AsyncExecuter.ToListAsync(
             q.Skip(input.SkipCount).Take(input.MaxResultCount));
+
         return new PagedResultDto<TransactionDto>(
             total,
             items.Select(t => new TransactionDto
@@ -340,9 +419,8 @@ public class BankingAppService : ApplicationService, IBankingAppService
                 DebitCardId = t.DebitCardId,
                 CreditCardId = t.CreditCardId
             }).ToList());
-
-
     }
+
     private static string NormalizeCardNo(string? cardNo)
     {
         cardNo = (cardNo ?? "").Trim();
@@ -351,6 +429,74 @@ public class BankingAppService : ApplicationService, IBankingAppService
         return cardNo;
     }
 
+    private Guid CurrentUserIdOrThrow()
+    {
+        if (!CurrentUser.IsAuthenticated)
+            throw new AbpAuthorizationException("Not authenticated.");
+        return CurrentUser.GetId();
+    }
+
+    private async Task<Customer> GetCustomerOwnedAsync(Guid customerId)
+    {
+        var userId = CurrentUserIdOrThrow();
+        var cust = await _customers.FindAsync(customerId);
+        if (cust == null) throw new UserFriendlyException("Müşteri bulunamadı.");
+
+        if (cust.UserId != userId)
+            throw new AbpAuthorizationException("Bu müşteriye erişimin yok.");
+
+        return cust;
+    }
+
+    private async Task<Account> GetAccountOwnedAsync(Guid accountId)
+    {
+        var userId = CurrentUserIdOrThrow();
+
+        var acc = await _accounts.FindAsync(accountId);
+        if (acc == null) throw new UserFriendlyException("Hesap bulunamadı.");
+
+        var cust = await _customers.FindAsync(acc.CustomerId);
+        if (cust == null) throw new UserFriendlyException("Müşteri bulunamadı.");
+
+        if (cust.UserId != userId)
+            throw new AbpAuthorizationException("Bu hesaba erişimin yok.");
+
+        return acc;
+    }
+
+    private async Task<DebitCard> GetDebitCardOwnedByCardNoAsync(string cardNo)
+    {
+        var userId = CurrentUserIdOrThrow();
+
+        var card = await _debitCards.FirstOrDefaultAsync(x => x.CardNo == cardNo);
+        if (card == null) throw new UserFriendlyException("Debit card not found.");
+
+        var acc = await _accounts.FindAsync(card.AccountId);
+        if (acc == null) throw new UserFriendlyException("Hesap bulunamadı.");
+
+        var cust = await _customers.FindAsync(acc.CustomerId);
+        if (cust == null) throw new UserFriendlyException("Müşteri bulunamadı.");
+
+        if (cust.UserId != userId)
+            throw new AbpAuthorizationException("Bu karta erişimin yok.");
+
+        return card;
+    }
+    private async Task<CreditCard> GetCreditCardOwnedByCardNoAsync(string cardNo)
+    {
+        var userId = CurrentUserIdOrThrow();
+
+        var card = await _creditCards.FirstOrDefaultAsync(x => x.CardNo == cardNo);
+        if (card == null) throw new UserFriendlyException("Credit card not found.");
+
+        var cust = await _customers.FindAsync(card.CustomerId);
+        if (cust == null) throw new UserFriendlyException("Müşteri bulunamadı.");
+
+        if (cust.UserId != userId)
+            throw new AbpAuthorizationException("Bu kredi kartına erişimin yok.");
+
+        return card;
+    }
 
 
 }
