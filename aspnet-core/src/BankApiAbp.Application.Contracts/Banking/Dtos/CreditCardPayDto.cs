@@ -9,6 +9,9 @@ public class CreditCardPayDto
     public string CardNo { get; set; }=default!;
     [Required]
     public Guid AccountId { get; set; }
+    [Required]
+    public string Cvv { get; set; } = default!;
+
 
     [Range(0.01, double.MaxValue)]
     public decimal Amount { get; set; }

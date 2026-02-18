@@ -57,6 +57,7 @@ public static class BankApiAbpDbContextModelCreatingExtensions
 
             b.Property(x => x.CardNo).IsRequired().HasMaxLength(16);
             b.Property(x => x.CvvHash).IsRequired().HasMaxLength(500);
+            
 
             b.HasIndex(x => x.CardNo).IsUnique();
 
@@ -72,7 +73,9 @@ public static class BankApiAbpDbContextModelCreatingExtensions
             b.ConfigureByConvention();
 
             b.Property(x => x.CardNo).IsRequired().HasMaxLength(16);
-            b.Property(x => x.Cvv).IsRequired().HasMaxLength(4);
+            b.Property(x => x.CvvHash)
+                .HasMaxLength(500)
+                .IsRequired();
 
             b.Property(x => x.Limit).HasColumnType("numeric(18,2)");
             b.Property(x => x.CurrentDebt).HasColumnType("numeric(18,2)");

@@ -157,14 +157,32 @@ public class BankingAppService : ApplicationService, IBankingAppService
         var card = await _debitCards.FirstOrDefaultAsync(x => x.CardNo == input.CardNo);
         if (card == null) throw new EntityNotFoundException(typeof(DebitCard), input.CardNo);
 
-        if (!card.IsActive)
-            throw new UserFriendlyException("Card is not active.");
+       /* if (!card.IsActive)
+            throw new UserFriendlyException("Card is not active.");*/
 
         var now = Clock.Now;
         card.EnsureUsable(now);
         card.VerifyCvv(input.Cvv);
 
         var account = await _accounts.GetAsync(card.AccountId);
+
+        var start = now.Date;
+        var end = start.AddDays(1);
+
+        var spentToday = await AsyncExecuter.SumAsync(
+            (await _tx.GetQueryableAsync())
+            .Where(t => t.DebitCardId == card.Id
+            && t.TxType == TransactionType.DebitCardSpend
+            && t.CreationTime >= start
+            && t.CreationTime < end),
+            t => (decimal?)t.Amount) ?? 0m;
+
+        if (spentToday + input.Amount > card.DailyLimit)
+        {
+            throw new UserFriendlyException(
+                $"Daily Limit exceeded. Limit={card.DailyLimit}, SpentToday={spentToday}, Amount={input.Amount}");
+        }
+
         account.Withdraw(input.Amount);
 
         await _accounts.UpdateAsync(account, autoSave: true);
@@ -182,8 +200,15 @@ public class BankingAppService : ApplicationService, IBankingAppService
 
     public async Task CreditCardSpendAsync(CardSpendDto input)
     {
+        input.CardNo = NormalizeCardNo(input.CardNo);
+
         var card = await _creditCards.FirstOrDefaultAsync(x => x.CardNo == input.CardNo);
-        if (card == null) throw new UserFriendlyException("Credit card not found.");
+        if (card == null)
+            throw new UserFriendlyException("Credit card not found.");
+
+        var now = Clock.Now;
+        card.EnsureUsable(now);
+        card.VerifyCvv(input.Cvv);
 
         card.Spend(input.Amount);
 
@@ -204,11 +229,21 @@ public class BankingAppService : ApplicationService, IBankingAppService
         if (input.Amount <= 0)
             throw new BusinessException("Amount must be greater than zero");
 
+        input.CardNo = NormalizeCardNo(input.CardNo);
+
         var card = await _creditCards.FirstOrDefaultAsync(x => x.CardNo == input.CardNo);
         if (card is null)
-            throw new BusinessException("CreditCardNotFound").WithData("CardNo", input.CardNo);
+            throw new BusinessException("CreditCardNotFound")
+                .WithData("CardNo", input.CardNo);
+
+        var now = Clock.Now;
+        card.EnsureUsable(now);
+        card.VerifyCvv(input.Cvv);
 
         var account = await _accounts.GetAsync(input.AccountId);
+
+        if (!account.IsActive)
+            throw new UserFriendlyException("Hesap aktif değil.");
 
         if (account.Balance < input.Amount)
             throw new BusinessException("InsufficientBalance")
@@ -221,7 +256,6 @@ public class BankingAppService : ApplicationService, IBankingAppService
                 .WithData("Amount", input.Amount);
 
         account.Withdraw(input.Amount);
-
         card.Pay(input.Amount);
 
         await _accounts.UpdateAsync(account, autoSave: true);
@@ -309,6 +343,14 @@ public class BankingAppService : ApplicationService, IBankingAppService
 
 
     }
-  
+    private static string NormalizeCardNo(string? cardNo)
+    {
+        cardNo = (cardNo ?? "").Trim();
+        if (cardNo.Length != 16 || !cardNo.All(char.IsDigit))
+            throw new UserFriendlyException("CardNo 16 haneli ve sadece rakamlardan oluşmalı.");
+        return cardNo;
+    }
+
+
 
 }
