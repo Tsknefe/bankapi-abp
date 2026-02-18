@@ -9,7 +9,7 @@ public class CreditCard : FullAuditedAggregateRoot<Guid>
     public Guid CustomerId { get; private set; }
     public string CardNo { get; private set; } = default!;
     public DateTime ExpireAt { get; private set; }
-    public string Cvv { get; private set; } = default!;
+    public string CvvHash { get; private set; } = default!;
     public decimal Limit { get; private set; }
     public decimal CurrentDebt { get; private set; }
     public bool IsActive { get; private set; } = true;
@@ -22,12 +22,11 @@ public class CreditCard : FullAuditedAggregateRoot<Guid>
         CustomerId = customerId;
         CardNo = cardNo;
         ExpireAt = expireAt;
-        Cvv = cvv;
+        CvvHash = BCrypt.Net.BCrypt.HashPassword(cvv);
         Limit = limit;
         CurrentDebt = 0;
         IsActive = true;
     }
-
     public void Spend(decimal amount)
     {
         if (amount <= 0) throw new ArgumentException("Amount must be > 0");
@@ -55,6 +54,7 @@ public class CreditCard : FullAuditedAggregateRoot<Guid>
     {
         if (string.IsNullOrWhiteSpace(cvv)) throw new BusinessException("Cvv Required");
         if (cvv.Length < 3 || cvv.Length > 4) throw new BusinessException("Cvv Invalid");
-        if (Cvv != cvv) throw new BusinessException("Credit Card Invalid Cvv");
+        if (!BCrypt.Net.BCrypt.Verify(cvv, CvvHash))
+            throw new BusinessException("Credit Card Invalid Cvv");
     }
 }
