@@ -14,7 +14,6 @@ public interface IBankingAppService : IApplicationService
     Task<IdResponseDto> CreateCreditCardAsync(CreateCreditCardDto input);
     Task<AccountDto> GetAccountAsync(Guid id);
     Task<CreditCardDto> GetCreditCardDto(string cardNo);
-    Task<PagedResultDto<TransactionDto>> GetTransactionsAsync(GetTransactionsInput input);
 
     Task DepositAsync(DepositDto input);
     Task WithdrawAsync(WithdrawDto input);
@@ -30,5 +29,6 @@ public interface IBankingAppService : IApplicationService
     Task<PagedResultDto<DebitCardListItemDto>> GetMyDebitCardsAsync(MyDebitCardsInput input);
     Task<PagedResultDto<CreditCardListItemDto>> GetMyCreditCardsAsync(MyCreditCardsInput input);
     Task<PagedResultDto<TransactionListItemDto>> GetMyTransactionsAsync(MyTransactionsInput input);
+    Task<BankingSummaryDto> GetMySummaryAsync(int lastTxCount = 10);
 
 }
