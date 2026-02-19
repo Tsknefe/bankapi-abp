@@ -21,5 +21,14 @@ public interface IBankingAppService : IApplicationService
     Task DebitCardSpendAsync(CardSpendDto input);
     Task CreditCardSpendAsync(CardSpendDto input);
     Task CreditCardPayAsync(CreditCardPayDto input);
-    
+    Task<AccountSummaryDto> GetAccountSummaryAsync(Guid accountId);
+    Task<PagedResultDto<TransactionDto>> GetAccountStatementAsync(GetAccountStatementInput input);
+    Task<CardSpendSummaryDto> GetDebitCardSpendSummaryAsync(string cardNo);
+    Task<CardSpendSummaryDto> GetCreditCardSpendSummaryAsync(string cardNo);
+    Task<PagedResultDto<CustomerListItemDto>> GetMyCustomersAsync(CustomerListInput input);
+    Task<PagedResultDto<AccountListItemDto>> GetMyAccountsAsync(MyAccountsInput input);
+    Task<PagedResultDto<DebitCardListItemDto>> GetMyDebitCardsAsync(MyDebitCardsInput input);
+    Task<PagedResultDto<CreditCardListItemDto>> GetMyCreditCardsAsync(MyCreditCardsInput input);
+    Task<PagedResultDto<TransactionListItemDto>> GetMyTransactionsAsync(MyTransactionsInput input);
+
 }
