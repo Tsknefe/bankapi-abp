@@ -1,5 +1,6 @@
 ﻿using BankApiAbp.Localization;
 using Volo.Abp.AuditLogging;
+using Volo.Abp.Authorization.Permissions;
 using Volo.Abp.BackgroundJobs;
 using Volo.Abp.FeatureManagement;
 using Volo.Abp.Identity;
@@ -54,5 +55,10 @@ public class BankApiAbpDomainSharedModule : AbpModule
         {
             options.MapCodeNamespace("BankApiAbp", typeof(BankApiAbpResource));
         });
+        Configure<AbpPermissionOptions>(options =>
+        {
+            options.DefinitionProviders.Add<BankApiAbp.Banking.BankingPermissionDefinitionProvider>();
+        });
+
     }
 }

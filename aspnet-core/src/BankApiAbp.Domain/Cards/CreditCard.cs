@@ -63,4 +63,12 @@ public class CreditCard : FullAuditedAggregateRoot<Guid>
         if (!BCrypt.Net.BCrypt.Verify(cvv, CvvHash))
             throw new BusinessException("CreditCardInvalidCvv");
     }
+    public void SetCvv(string cvv)
+    {
+        if (string.IsNullOrWhiteSpace(cvv)) throw new BusinessException("Cvv Required");
+        if (cvv.Length < 3 || cvv.Length > 4) throw new BusinessException("Cvv Invalid");
+
+        CvvHash = BCrypt.Net.BCrypt.HashPassword(cvv);
+    }
+
 }

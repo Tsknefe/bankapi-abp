@@ -3,7 +3,9 @@ using System.Linq;
 using System.Threading.Tasks;
 using BankApiAbp.Banking.Dtos;
 using BankApiAbp.Entities;
+using BankApiAbp.Permissions;
 using BankApiAbp.Transactions;
+using Microsoft.AspNetCore.Authorization;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Authorization;
@@ -12,6 +14,7 @@ namespace BankApiAbp.Banking;
 
 public partial class BankingAppService
 {
+    [Authorize(BankingPermissions.Accounts.Create)]
     public async Task<IdResponseDto> CreateAccountAsync(CreateAccountDto input)
     {
         var userId = CurrentUserIdOrThrow();
@@ -29,7 +32,7 @@ public partial class BankingAppService
         );
 
         if (ibanExistsForUser)
-            throw new UserFriendlyException("Bu IBAN zaten mevcut ");
+            throw new UserFriendlyException("Bu IBAN zaten mevcut");
 
         var account = new Account(
             GuidGenerator.Create(),
@@ -44,10 +47,10 @@ public partial class BankingAppService
         return new IdResponseDto { Id = account.Id };
     }
 
+    [Authorize(BankingPermissions.Accounts.Deposit)]
     public async Task DepositAsync(DepositDto input)
     {
         var account = await GetAccountOwnedAsync(input.AccountId);
-
         account.Deposit(input.Amount);
 
         await _accounts.UpdateAsync(account, autoSave: true);
@@ -63,6 +66,7 @@ public partial class BankingAppService
         ), autoSave: true);
     }
 
+    [Authorize(BankingPermissions.Accounts.Withdraw)]
     public async Task WithdrawAsync(WithdrawDto input)
     {
         for (var attempt = 1; attempt <= 3; attempt++)
@@ -95,6 +99,7 @@ public partial class BankingAppService
         }
     }
 
+    [Authorize(BankingPermissions.Accounts.Read)]
     public async Task<AccountDto> GetAccountAsync(Guid id)
     {
         var acc = await GetAccountOwnedAsync(id);
@@ -111,6 +116,51 @@ public partial class BankingAppService
         };
     }
 
+    [Authorize(BankingPermissions.Accounts.List)]
+    public async Task<PagedResultDto<AccountListItemDto>> GetMyAccountsAsync(MyAccountsInput input)
+    {
+        var userId = CurrentUserIdOrThrow();
+
+        var accountsQ = await _accounts.GetQueryableAsync();
+        var customersQ = await _customers.GetQueryableAsync();
+
+        var q =
+            from a in accountsQ
+            join c in customersQ on a.CustomerId equals c.Id
+            where c.UserId == userId
+            select a;
+
+        if (input.CustomerId.HasValue)
+            q = q.Where(a => a.CustomerId == input.CustomerId.Value);
+
+        if (!string.IsNullOrWhiteSpace(input.Filter))
+        {
+            var f = input.Filter.Trim();
+            q = q.Where(a => a.Name.Contains(f) || a.Iban.Contains(f));
+        }
+
+        var total = await AsyncExecuter.CountAsync(q);
+
+        q = q.OrderBy(x => x.Name);
+
+        var items = await AsyncExecuter.ToListAsync(q.Skip(input.SkipCount).Take(input.MaxResultCount));
+
+        return new PagedResultDto<AccountListItemDto>(
+            total,
+            items.Select(a => new AccountListItemDto
+            {
+                Id = a.Id,
+                CustomerId = a.CustomerId,
+                Name = a.Name,
+                Iban = a.Iban,
+                Balance = a.Balance,
+                AccountType = a.AccountType,
+                IsActive = a.IsActive
+            }).ToList()
+        );
+    }
+
+    [Authorize(BankingPermissions.Accounts.Summary)]
     public async Task<AccountSummaryDto> GetAccountSummaryAsync(Guid accountId)
     {
         var acc = await GetAccountOwnedAsync(accountId);
@@ -165,12 +215,12 @@ public partial class BankingAppService
         };
     }
 
+    [Authorize(BankingPermissions.Accounts.Statement)]
     public async Task<PagedResultDto<TransactionDto>> GetAccountStatementAsync(GetAccountStatementInput input)
     {
         _ = await GetAccountOwnedAsync(input.AccountId);
 
         var txQ = await _tx.GetQueryableAsync();
-
         var q = txQ.Where(t => t.AccountId == input.AccountId);
 
         if (input.From.HasValue)
@@ -198,64 +248,5 @@ public partial class BankingAppService
                 CreditCardId = t.CreditCardId
             }).ToList()
         );
-    }
-
-    public async Task<PagedResultDto<AccountListItemDto>> GetMyAccountsAsync(MyAccountsInput input)
-    {
-        var userId = CurrentUserIdOrThrow();
-
-        var accountsQ = await _accounts.GetQueryableAsync();
-        var customersQ = await _customers.GetQueryableAsync();
-
-        var q =
-            from a in accountsQ
-            join c in customersQ on a.CustomerId equals c.Id
-            where c.UserId == userId
-            select a;
-
-        if (input.CustomerId.HasValue)
-            q = q.Where(a => a.CustomerId == input.CustomerId.Value);
-
-        if (!string.IsNullOrWhiteSpace(input.Filter))
-        {
-            var f = input.Filter.Trim();
-            q = q.Where(a => a.Name.Contains(f) || a.Iban.Contains(f));
-        }
-
-        var total = await AsyncExecuter.CountAsync(q);
-
-        q = q.OrderBy(x => x.Name);
-
-        var items = await AsyncExecuter.ToListAsync(q.Skip(input.SkipCount).Take(input.MaxResultCount));
-
-        return new PagedResultDto<AccountListItemDto>(
-            total,
-            items.Select(a => new AccountListItemDto
-            {
-                Id = a.Id,
-                CustomerId = a.CustomerId,
-                Name = a.Name,
-                Iban = a.Iban,
-                Balance = a.Balance,
-                AccountType = a.AccountType,
-                IsActive = a.IsActive
-            }).ToList()
-        );
-    }
-
-    private async Task<Account> GetAccountOwnedAsync(Guid accountId)
-    {
-        var userId = CurrentUserIdOrThrow();
-
-        var acc = await _accounts.FindAsync(accountId);
-        if (acc == null) throw new UserFriendlyException("Hesap bulunamadı.");
-
-        var cust = await _customers.FindAsync(acc.CustomerId);
-        if (cust == null) throw new UserFriendlyException("Müşteri bulunamadı.");
-
-        if (cust.UserId != userId)
-            throw new AbpAuthorizationException("Bu hesaba erişimin yok.");
-
-        return acc;
     }
 }
