@@ -26,6 +26,8 @@ public class BankApiAbpApplicationModule : AbpModule
         Configure<AbpAutoMapperOptions>(options =>
         {
             options.AddMaps<BankApiAbpApplicationModule>();
+
         });
+
     }
 }

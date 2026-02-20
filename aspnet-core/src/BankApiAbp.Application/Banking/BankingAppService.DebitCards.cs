@@ -3,16 +3,18 @@ using System.Linq;
 using System.Threading.Tasks;
 using BankApiAbp.Banking.Dtos;
 using BankApiAbp.Cards;
+using BankApiAbp.Permissions;
 using BankApiAbp.Transactions;
+using Microsoft.AspNetCore.Authorization;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Authorization;
-using Volo.Abp.Domain.Repositories;
 
 namespace BankApiAbp.Banking;
 
 public partial class BankingAppService
 {
+    [Authorize(BankingPermissions.DebitCards.Create)]
     public async Task<IdResponseDto> CreateDebitCardAsync(CreateDebitCardDto input)
     {
         var userId = CurrentUserIdOrThrow();
@@ -47,6 +49,7 @@ public partial class BankingAppService
         return new IdResponseDto { Id = card.Id };
     }
 
+    [Authorize(BankingPermissions.DebitCards.Spend)]
     public async Task DebitCardSpendAsync(CardSpendDto input)
     {
         var cardNo = NormalizeCardNo(input.CardNo);
@@ -105,6 +108,7 @@ public partial class BankingAppService
         }
     }
 
+    [Authorize(BankingPermissions.DebitCards.SpendSummary)]
     public async Task<CardSpendSummaryDto> GetDebitCardSpendSummaryAsync(string cardNo)
     {
         cardNo = NormalizeCardNo(cardNo);
@@ -139,6 +143,7 @@ public partial class BankingAppService
         };
     }
 
+    [Authorize(BankingPermissions.DebitCards.List)]
     public async Task<PagedResultDto<DebitCardListItemDto>> GetMyDebitCardsAsync(MyDebitCardsInput input)
     {
         var userId = CurrentUserIdOrThrow();
@@ -159,12 +164,11 @@ public partial class BankingAppService
 
         if (!string.IsNullOrWhiteSpace(input.CardNo))
         {
-            var n = NormalizeCardNo(input.CardNo);
-            q = q.Where(dc => dc.CardNo == n);
+            var cn = NormalizeCardNo(input.CardNo);
+            q = q.Where(dc => dc.CardNo == cn);
         }
 
         var total = await AsyncExecuter.CountAsync(q);
-
         q = q.OrderBy(x => x.CardNo);
 
         var items = await AsyncExecuter.ToListAsync(q.Skip(input.SkipCount).Take(input.MaxResultCount));
@@ -181,24 +185,5 @@ public partial class BankingAppService
                 IsActive = dc.IsActive
             }).ToList()
         );
-    }
-
-    private async Task<DebitCard> GetDebitCardOwnedByCardNoAsync(string cardNo)
-    {
-        var userId = CurrentUserIdOrThrow();
-
-        var card = await _debitCards.FirstOrDefaultAsync(x => x.CardNo == cardNo);
-        if (card == null) throw new UserFriendlyException("Debit card not found.");
-
-        var acc = await _accounts.FindAsync(card.AccountId);
-        if (acc == null) throw new UserFriendlyException("Hesap bulunamadı.");
-
-        var cust = await _customers.FindAsync(acc.CustomerId);
-        if (cust == null) throw new UserFriendlyException("Müşteri bulunamadı.");
-
-        if (cust.UserId != userId)
-            throw new AbpAuthorizationException("Bu karta erişimin yok.");
-
-        return card;
     }
 }

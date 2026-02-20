@@ -3,16 +3,18 @@ using System.Linq;
 using System.Threading.Tasks;
 using BankApiAbp.Banking.Dtos;
 using BankApiAbp.Cards;
+using BankApiAbp.Permissions;
 using BankApiAbp.Transactions;
+using Microsoft.AspNetCore.Authorization;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Authorization;
-using Volo.Abp.Domain.Repositories;
 
 namespace BankApiAbp.Banking;
 
 public partial class BankingAppService
 {
+    [Authorize(BankingPermissions.CreditCards.Create)]
     public async Task<IdResponseDto> CreateCreditCardAsync(CreateCreditCardDto input)
     {
         var userId = CurrentUserIdOrThrow();
@@ -46,6 +48,7 @@ public partial class BankingAppService
         return new IdResponseDto { Id = card.Id };
     }
 
+    [Authorize(BankingPermissions.CreditCards.Spend)]
     public async Task CreditCardSpendAsync(CardSpendDto input)
     {
         var cardNo = NormalizeCardNo(input.CardNo);
@@ -84,6 +87,7 @@ public partial class BankingAppService
         }
     }
 
+    [Authorize(BankingPermissions.CreditCards.Pay)]
     public async Task CreditCardPayAsync(CreditCardPayDto input)
     {
         if (input.Amount <= 0)
@@ -139,10 +143,10 @@ public partial class BankingAppService
         }
     }
 
+    [Authorize(BankingPermissions.CreditCards.Read)]
     public async Task<CreditCardDto> GetCreditCardDto(string cardNo)
     {
         cardNo = NormalizeCardNo(cardNo);
-
         var card = await GetCreditCardOwnedByCardNoAsync(cardNo);
 
         return new CreditCardDto
@@ -157,6 +161,7 @@ public partial class BankingAppService
         };
     }
 
+    [Authorize(BankingPermissions.CreditCards.SpendSummary)]
     public async Task<CardSpendSummaryDto> GetCreditCardSpendSummaryAsync(string cardNo)
     {
         cardNo = NormalizeCardNo(cardNo);
@@ -191,6 +196,7 @@ public partial class BankingAppService
         };
     }
 
+    [Authorize(BankingPermissions.CreditCards.List)]
     public async Task<PagedResultDto<CreditCardListItemDto>> GetMyCreditCardsAsync(MyCreditCardsInput input)
     {
         var userId = CurrentUserIdOrThrow();
@@ -209,12 +215,11 @@ public partial class BankingAppService
 
         if (!string.IsNullOrWhiteSpace(input.CardNo))
         {
-            var n = NormalizeCardNo(input.CardNo);
-            q = q.Where(cc => cc.CardNo == n);
+            var cn = NormalizeCardNo(input.CardNo);
+            q = q.Where(cc => cc.CardNo == cn);
         }
 
         var total = await AsyncExecuter.CountAsync(q);
-
         q = q.OrderBy(x => x.CardNo);
 
         var items = await AsyncExecuter.ToListAsync(q.Skip(input.SkipCount).Take(input.MaxResultCount));
@@ -232,21 +237,5 @@ public partial class BankingAppService
                 IsActive = cc.IsActive
             }).ToList()
         );
-    }
-
-    private async Task<CreditCard> GetCreditCardOwnedByCardNoAsync(string cardNo)
-    {
-        var userId = CurrentUserIdOrThrow();
-
-        var card = await _creditCards.FirstOrDefaultAsync(x => x.CardNo == cardNo);
-        if (card == null) throw new UserFriendlyException("Credit card not found.");
-
-        var cust = await _customers.FindAsync(card.CustomerId);
-        if (cust == null) throw new UserFriendlyException("Müşteri bulunamadı.");
-
-        if (cust.UserId != userId)
-            throw new AbpAuthorizationException("Bu kredi kartına erişimin yok.");
-
-        return card;
     }
 }

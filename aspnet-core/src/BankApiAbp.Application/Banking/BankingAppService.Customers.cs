@@ -3,6 +3,8 @@ using System.Linq;
 using System.Threading.Tasks;
 using BankApiAbp.Banking.Dtos;
 using BankApiAbp.Entities;
+using BankApiAbp.Permissions;
+using Microsoft.AspNetCore.Authorization;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Authorization;
@@ -12,6 +14,7 @@ namespace BankApiAbp.Banking;
 
 public partial class BankingAppService
 {
+    [Authorize(BankingPermissions.Customers.Create)]
     public async Task<IdResponseDto> CreateCustomerAsync(CreateCustomerDto input)
     {
         var userId = CurrentUserIdOrThrow();
@@ -33,6 +36,7 @@ public partial class BankingAppService
         return new IdResponseDto { Id = customer.Id };
     }
 
+    [Authorize(BankingPermissions.Customers.List)]
     public async Task<PagedResultDto<CustomerListItemDto>> GetMyCustomersAsync(CustomerListInput input)
     {
         var userId = CurrentUserIdOrThrow();
@@ -43,19 +47,14 @@ public partial class BankingAppService
         if (!string.IsNullOrWhiteSpace(input.Filter))
         {
             var f = input.Filter.Trim();
-            q = q.Where(x =>
-                x.Name.Contains(f) ||
-                x.TcNo.Contains(f) ||
-                x.BirthPlace.Contains(f));
+            q = q.Where(x => x.Name.Contains(f) || x.TcNo.Contains(f) || x.BirthPlace.Contains(f));
         }
 
         var total = await AsyncExecuter.CountAsync(q);
 
         q = q.OrderBy(x => x.Name);
 
-        var items = await AsyncExecuter.ToListAsync(
-            q.Skip(input.SkipCount).Take(input.MaxResultCount)
-        );
+        var items = await AsyncExecuter.ToListAsync(q.Skip(input.SkipCount).Take(input.MaxResultCount));
 
         return new PagedResultDto<CustomerListItemDto>(
             total,
@@ -67,18 +66,5 @@ public partial class BankingAppService
                 BirthPlace = c.BirthPlace
             }).ToList()
         );
-    }
-
-    private async Task<Customer> GetCustomerOwnedAsync(Guid customerId)
-    {
-        var userId = CurrentUserIdOrThrow();
-
-        var cust = await _customers.FindAsync(customerId);
-        if (cust == null) throw new UserFriendlyException("Müşteri bulunamadı.");
-
-        if (cust.UserId != userId)
-            throw new AbpAuthorizationException("Bu müşteriye erişimin yok.");
-
-        return cust;
     }
 }
