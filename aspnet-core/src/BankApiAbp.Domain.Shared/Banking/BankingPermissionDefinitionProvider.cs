@@ -9,43 +9,61 @@ public class BankingPermissionDefinitionProvider : PermissionDefinitionProvider
     public override void Define(IPermissionDefinitionContext context)
     {
         var group = context.GetGroupOrNull(BankingPermissions.GroupName)
-        ?? context.AddGroup(BankingPermissions.GroupName, L("Permission:Banking"));
+            ?? context.AddGroup(BankingPermissions.GroupName, L("Permission:Banking"));
 
-        var customers = group.AddPermission(BankingPermissions.Customers.Default, L("Permission:Customers"));
-        customers.AddChild(BankingPermissions.Customers.Create, L("Permission:Create"));
-        customers.AddChild(BankingPermissions.Customers.Read, L("Permission:Read"));
-        customers.AddChild(BankingPermissions.Customers.List, L("Permission:List"));
+        var customers = GetOrAddPermission(group, BankingPermissions.Customers.Default, L("Permission:Customers"));
+        AddChildIfNotExists(group, customers, BankingPermissions.Customers.Create, L("Permission:Create"));
+        AddChildIfNotExists(group, customers, BankingPermissions.Customers.Read, L("Permission:Read"));
+        AddChildIfNotExists(group, customers, BankingPermissions.Customers.List, L("Permission:List"));
 
-        var accounts = group.AddPermission(BankingPermissions.Accounts.Default, L("Permission:Accounts"));
-        accounts.AddChild(BankingPermissions.Accounts.Create, L("Permission:Create"));
-        accounts.AddChild(BankingPermissions.Accounts.Read, L("Permission:Read"));
-        accounts.AddChild(BankingPermissions.Accounts.List, L("Permission:List"));
-        accounts.AddChild(BankingPermissions.Accounts.Deposit, L("Permission:Deposit"));
-        accounts.AddChild(BankingPermissions.Accounts.Withdraw, L("Permission:Withdraw"));
-        accounts.AddChild(BankingPermissions.Accounts.Statement, L("Permission:Statement"));
-        accounts.AddChild(BankingPermissions.Accounts.Summary, L("Permission:Summary"));
+        var accounts = GetOrAddPermission(group, BankingPermissions.Accounts.Default, L("Permission:Accounts"));
+        AddChildIfNotExists(group, accounts, BankingPermissions.Accounts.Create, L("Permission:Create"));
+        AddChildIfNotExists(group, accounts, BankingPermissions.Accounts.Read, L("Permission:Read"));
+        AddChildIfNotExists(group, accounts, BankingPermissions.Accounts.List, L("Permission:List"));
+        AddChildIfNotExists(group, accounts, BankingPermissions.Accounts.Deposit, L("Permission:Deposit"));
+        AddChildIfNotExists(group, accounts, BankingPermissions.Accounts.Withdraw, L("Permission:Withdraw"));
+        AddChildIfNotExists(group, accounts, BankingPermissions.Accounts.Statement, L("Permission:Statement"));
+        AddChildIfNotExists(group, accounts, BankingPermissions.Accounts.Summary, L("Permission:Summary"));
 
-        var debit = group.AddPermission(BankingPermissions.DebitCards.Default, L("Permission:DebitCards"));
-        debit.AddChild(BankingPermissions.DebitCards.Create, L("Permission:Create"));
-        debit.AddChild(BankingPermissions.DebitCards.Read, L("Permission:Read"));
-        debit.AddChild(BankingPermissions.DebitCards.List, L("Permission:List"));
-        debit.AddChild(BankingPermissions.DebitCards.Spend, L("Permission:Spend"));
-        debit.AddChild(BankingPermissions.DebitCards.SpendSummary, L("Permission:SpendSummary"));
+        var debit = GetOrAddPermission(group, BankingPermissions.DebitCards.Default, L("Permission:DebitCards"));
+        AddChildIfNotExists(group, debit, BankingPermissions.DebitCards.Create, L("Permission:Create"));
+        AddChildIfNotExists(group, debit, BankingPermissions.DebitCards.Read, L("Permission:Read"));
+        AddChildIfNotExists(group, debit, BankingPermissions.DebitCards.List, L("Permission:List"));
+        AddChildIfNotExists(group, debit, BankingPermissions.DebitCards.Spend, L("Permission:Spend"));
+        AddChildIfNotExists(group, debit, BankingPermissions.DebitCards.SpendSummary, L("Permission:SpendSummary"));
 
-        var credit = group.AddPermission(BankingPermissions.CreditCards.Default, L("Permission:CreditCards"));
-        credit.AddChild(BankingPermissions.CreditCards.Create, L("Permission:Create"));
-        credit.AddChild(BankingPermissions.CreditCards.Read, L("Permission:Read"));
-        credit.AddChild(BankingPermissions.CreditCards.List, L("Permission:List"));
-        credit.AddChild(BankingPermissions.CreditCards.Spend, L("Permission:Spend"));
-        credit.AddChild(BankingPermissions.CreditCards.Pay, L("Permission:Pay"));
-        credit.AddChild(BankingPermissions.CreditCards.SpendSummary, L("Permission:SpendSummary"));
+        var credit = GetOrAddPermission(group, BankingPermissions.CreditCards.Default, L("Permission:CreditCards"));
+        AddChildIfNotExists(group, credit, BankingPermissions.CreditCards.Create, L("Permission:Create"));
+        AddChildIfNotExists(group, credit, BankingPermissions.CreditCards.Read, L("Permission:Read"));
+        AddChildIfNotExists(group, credit, BankingPermissions.CreditCards.List, L("Permission:List"));
+        AddChildIfNotExists(group, credit, BankingPermissions.CreditCards.Spend, L("Permission:Spend"));
+        AddChildIfNotExists(group, credit, BankingPermissions.CreditCards.Pay, L("Permission:Pay"));
+        AddChildIfNotExists(group, credit, BankingPermissions.CreditCards.SpendSummary, L("Permission:SpendSummary"));
 
-        var tx = group.AddPermission(BankingPermissions.Transactions.Default, L("Permission:Transactions"));
-        tx.AddChild(BankingPermissions.Transactions.List, L("Permission:List"));
-        tx.AddChild(BankingPermissions.Transactions.Read, L("Permission:Read"));
+        var tx = GetOrAddPermission(group, BankingPermissions.Transactions.Default, L("Permission:Transactions"));
+        AddChildIfNotExists(group, tx, BankingPermissions.Transactions.List, L("Permission:List"));
+        AddChildIfNotExists(group, tx, BankingPermissions.Transactions.Read, L("Permission:Read"));
 
-        var dash = group.AddPermission(BankingPermissions.Dashboard.Default, L("Permission:Dashboard"));
-        dash.AddChild(BankingPermissions.Dashboard.Summary, L("Permission:Summary"));
+        var dash = GetOrAddPermission(group, BankingPermissions.Dashboard.Default, L("Permission:Dashboard"));
+        AddChildIfNotExists(group, dash, BankingPermissions.Dashboard.Summary, L("Permission:Summary"));
+    }
+
+    private static PermissionDefinition GetOrAddPermission(
+        PermissionGroupDefinition group,
+        string name,
+        LocalizableString displayName)
+        => group.GetPermissionOrNull(name) ?? group.AddPermission(name, displayName);
+
+    private static void AddChildIfNotExists(
+        PermissionGroupDefinition group,
+        PermissionDefinition parent,
+        string name,
+        LocalizableString displayName)
+    {
+        if (group.GetPermissionOrNull(name) != null)
+            return;
+
+        parent.AddChild(name, displayName);
     }
 
     private static LocalizableString L(string name)

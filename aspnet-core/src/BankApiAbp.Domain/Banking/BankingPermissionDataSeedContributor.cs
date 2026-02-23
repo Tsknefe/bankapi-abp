@@ -24,15 +24,12 @@ public class BankingPermissionDataSeedContributor : IDataSeedContributor, ITrans
 
     public async Task SeedAsync(DataSeedContext context)
     {
-        var adminRole = await _roleRepository.FindByNormalizedNameAsync("ADMIN");
-        if (adminRole == null)
-        {
-            adminRole = await _roleRepository.FindByNormalizedNameAsync("admin");
-        }
+        var adminRole =
+            await _roleRepository.FindByNormalizedNameAsync("ADMIN")
+            ?? await _roleRepository.FindByNormalizedNameAsync("ADMINISTRATOR");
 
         if (adminRole == null)
-            return; 
-
+            return;
         var permissions = new[]
         {
             BankingPermissions.Customers.Default,
