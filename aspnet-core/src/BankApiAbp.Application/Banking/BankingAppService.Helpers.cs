@@ -106,18 +106,16 @@ public partial class BankingAppService
     private string GetIdempotencyKeyOrThrow(string operation)
     {
         var ctx = _http.HttpContext;
-        if (ctx == null)
-            throw new BusinessException("HTTP_CONTEXT_MISSING");
+        if (ctx == null) throw new BusinessException("HTTP_CONTEXT_MISSING");
 
-        var key =
-            ctx.Request.Headers["Idempotency-Key"].FirstOrDefault()
-            ?? ctx.Request.Headers["X-Idempotency-Key"].FirstOrDefault();
+        var headerKey = ctx.Request.Headers["Idempotency-Key"].FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(headerKey)) return headerKey.Trim();
 
-        if (string.IsNullOrWhiteSpace(key))
-            throw new BusinessException("IDEMPOTENCY_KEY_REQUIRED")
-                .WithData("operation", operation);
+        var queryKey = ctx.Request.Query["idemKey"].FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(queryKey)) return queryKey.Trim();
 
-        return key.Trim();
+        throw new BusinessException("IDEMPOTENCY_KEY_REQUIRED")
+            .WithData("operation", operation);
     }
 
     private static string BuildRequestHash(Guid accountId, decimal amount, string? description)
