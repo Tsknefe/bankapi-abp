@@ -7,6 +7,7 @@ using Volo.Abp;
 using Volo.Abp.Authorization;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Users;
+using System.Threading;
 
 namespace BankApiAbp.Banking;
 
@@ -102,4 +103,42 @@ public partial class BankingAppService
         var ms = attempt switch { 1 => 20, 2 => 40, _ => 80 };
         return Task.Delay(ms);
     }
+    private string GetIdempotencyKeyOrThrow(string operation)
+    {
+        var ctx = _http.HttpContext;
+        if (ctx == null)
+            throw new BusinessException("HTTP_CONTEXT_MISSING");
+
+        var key =
+            ctx.Request.Headers["Idempotency-Key"].FirstOrDefault()
+            ?? ctx.Request.Headers["X-Idempotency-Key"].FirstOrDefault();
+
+        if (string.IsNullOrWhiteSpace(key))
+            throw new BusinessException("IDEMPOTENCY_KEY_REQUIRED")
+                .WithData("operation", operation);
+
+        return key.Trim();
+    }
+
+    private static string BuildRequestHash(Guid accountId, decimal amount, string? description)
+        => $"{accountId:N}|{amount}|{description}".GetHashCode().ToString();
+    private async Task EnsureAccountOwnedAsync(Guid accountId, CancellationToken ct)
+    {
+        var userId = CurrentUserIdOrThrow();
+
+        var accountsQ = await _accounts.GetQueryableAsync();
+        var customersQ = await _customers.GetQueryableAsync();
+
+        var ok = await AsyncExecuter.AnyAsync(
+            from a in accountsQ
+            join c in customersQ on a.CustomerId equals c.Id
+            where a.Id == accountId && c.UserId == userId
+            select a.Id,
+            ct
+        );
+
+        if (!ok)
+            throw new AbpAuthorizationException("Bu hesap size ait değil.");
+    }
+
 }
