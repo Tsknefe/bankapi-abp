@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using BankApiAbp.Banking.Dtos;
 using BankApiAbp.Entities;
@@ -50,33 +51,75 @@ public partial class BankingAppService
     [Authorize(BankingPermissions.Accounts.Deposit)]
     public async Task DepositAsync(DepositDto input)
     {
-        var account = await GetAccountOwnedAsync(input.AccountId);
-        account.Deposit(input.Amount);
+        var userId = CurrentUserIdOrThrow();
+        var operation = "accounts.deposit";
+        var key = GetIdempotencyKeyOrThrow(operation);
+        var requestHash = BuildRequestHash(input.AccountId, input.Amount, input.Description);
 
-        await _accounts.UpdateAsync(account, autoSave: true);
+        var (isDuplicate, record) =
+            await _idem.TryBeginAsync(userId, operation, key, requestHash);
 
-        await _tx.InsertAsync(new Transaction(
-            GuidGenerator.Create(),
-            TransactionType.Deposit,
-            input.Amount,
-            input.Description,
-            input.AccountId,
-            null,
-            null
-        ), autoSave: true);
+        if (isDuplicate)
+        {
+            await _idem.GetOrThrowDuplicateResponseAsync(record);
+            return;
+        }
+
+        try
+        {
+            await _retry.ExecuteAsync(async ct =>
+            {
+                var account = await _rowLock.LockAccountForUpdateAsync(input.AccountId, ct);
+                await EnsureAccountOwnedAsync(account.Id, ct);
+
+                account.Deposit(input.Amount);
+                await _accounts.UpdateAsync(account, autoSave: true);
+
+                await _tx.InsertAsync(new Transaction(
+                    GuidGenerator.Create(),
+                    TransactionType.Deposit,
+                    input.Amount,
+                    input.Description,
+                    account.Id,
+                    null,
+                    null
+                ), autoSave: true);
+            });
+
+            await _idem.CompleteAsync(record, new { Ok = true }, 200);
+        }
+        catch (Exception ex)
+        {
+            await _idem.FailAsync(record, ex);
+            throw;
+        }
     }
 
     [Authorize(BankingPermissions.Accounts.Withdraw)]
     public async Task WithdrawAsync(WithdrawDto input)
     {
-        for (var attempt = 1; attempt <= 3; attempt++)
+        var userId = CurrentUserIdOrThrow();
+        var operation = "accounts.withdraw";
+        var key = GetIdempotencyKeyOrThrow(operation);
+        var requestHash = BuildRequestHash(input.AccountId, input.Amount, input.Description);
+
+        var (isDuplicate, record) =
+            await _idem.TryBeginAsync(userId, operation, key, requestHash);
+
+        if (isDuplicate)
         {
-            try
+            await _idem.GetOrThrowDuplicateResponseAsync(record);
+            return;
+        }
+
+        try
+        {
+            await _retry.ExecuteAsync(async ct =>
             {
-                var account = await GetAccountOwnedAsync(input.AccountId);
+                var account = await _rowLock.LockAccountForUpdateAsync(input.AccountId, ct);
+                await EnsureAccountOwnedAsync(account.Id, ct);
 
                 account.Withdraw(input.Amount);
-
                 await _accounts.UpdateAsync(account, autoSave: true);
 
                 await _tx.InsertAsync(new Transaction(
@@ -84,38 +127,20 @@ public partial class BankingAppService
                     TransactionType.Withdraw,
                     input.Amount,
                     input.Description,
-                    input.AccountId,
+                    account.Id,
                     null,
                     null
                 ), autoSave: true);
+            });
 
-                return;
-            }
-            catch (Exception ex) when (IsConcurrency(ex))
-            {
-                if (attempt == 3) throw ConcurrencyFriendly();
-                await SmallBackoffAsync(attempt);
-            }
+            await _idem.CompleteAsync(record, new { Ok = true }, 200);
+        }
+        catch (Exception ex)
+        {
+            await _idem.FailAsync(record, ex);
+            throw;
         }
     }
-
-    [Authorize(BankingPermissions.Accounts.Read)]
-    public async Task<AccountDto> GetAccountAsync(Guid id)
-    {
-        var acc = await GetAccountOwnedAsync(id);
-
-        return new AccountDto
-        {
-            Id = acc.Id,
-            CustomerId = acc.CustomerId,
-            Name = acc.Name,
-            Iban = acc.Iban,
-            Balance = acc.Balance,
-            AccountType = acc.AccountType,
-            IsActive = acc.IsActive,
-        };
-    }
-
     [Authorize(BankingPermissions.Accounts.List)]
     public async Task<PagedResultDto<AccountListItemDto>> GetMyAccountsAsync(MyAccountsInput input)
     {
@@ -248,5 +273,21 @@ public partial class BankingAppService
                 CreditCardId = t.CreditCardId
             }).ToList()
         );
+    }
+    [Authorize(BankingPermissions.Accounts.Read)]
+    public async Task<AccountDto> GetAccountAsync(Guid id)
+    {
+        var acc = await GetAccountOwnedAsync(id);
+
+        return new AccountDto
+        {
+            Id = acc.Id,
+            CustomerId = acc.CustomerId,
+            Name = acc.Name,
+            Iban = acc.Iban,
+            Balance = acc.Balance,
+            AccountType = acc.AccountType,
+            IsActive = acc.IsActive
+        };
     }
 }
