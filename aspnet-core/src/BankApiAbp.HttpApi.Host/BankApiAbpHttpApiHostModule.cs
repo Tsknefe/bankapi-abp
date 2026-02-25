@@ -34,6 +34,9 @@ using Volo.Abp.AspNetCore.Mvc.AntiForgery;
 
 using StackExchange.Redis;
 using Volo.Abp.Caching;
+using Volo.Abp.DistributedLocking;
+using Medallion.Threading;
+using Medallion.Threading.Redis;
 
 namespace BankApiAbp;
 
@@ -46,7 +49,8 @@ namespace BankApiAbp;
     typeof(AbpAspNetCoreMvcUiLeptonXLiteThemeModule),
     typeof(AbpAccountWebOpenIddictModule),
     typeof(AbpAspNetCoreSerilogModule),
-    typeof(AbpSwashbuckleModule)
+    typeof(AbpSwashbuckleModule),
+    typeof(AbpDistributedLockingModule)
 )]
 public class BankApiAbpHttpApiHostModule : AbpModule
 {
@@ -108,6 +112,17 @@ public class BankApiAbpHttpApiHostModule : AbpModule
         context.Services.AddStackExchangeRedisCache(options =>
         {
             options.Configuration = redisCfg;
+        });
+
+        Configure<AbpDistributedLockOptions>(options =>
+        {
+            options.KeyPrefix = "BankApiAbp:";
+        });
+
+        context.Services.AddSingleton<IDistributedLockProvider>(sp =>
+        {
+            var mux = sp.GetRequiredService<IConnectionMultiplexer>();
+            return new RedisDistributedSynchronizationProvider(mux.GetDatabase());
         });
     }
 

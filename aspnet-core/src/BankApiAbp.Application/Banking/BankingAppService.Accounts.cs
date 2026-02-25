@@ -67,6 +67,14 @@ public partial class BankingAppService
 
         try
         {
+            await using var handle = await _distributedLock.TryAcquireAsync(
+                    $"account:{input.AccountId}",
+                    TimeSpan.FromSeconds(10)
+            );
+
+            if (handle == null)
+                throw new UserFriendlyException("Hesap şu anda başka bir işlem tarafından kullanılıyor. Lütfen tekrar deneyin.");
+           
             await _retry.ExecuteAsync(async ct =>
             {
                 var account = await _rowLock.LockAccountForUpdateAsync(input.AccountId, ct);
@@ -114,6 +122,14 @@ public partial class BankingAppService
 
         try
         {
+            await using var handle = await _distributedLock.TryAcquireAsync(
+                    $"account:{input.AccountId}",
+                    TimeSpan.FromSeconds(10)
+            );
+
+            if (handle == null)
+                throw new UserFriendlyException("Hesap şu anda başka bir işlem tarafından kullanılıyor. Lütfen tekrar deneyin.");
+            
             await _retry.ExecuteAsync(async ct =>
             {
                 var account = await _rowLock.LockAccountForUpdateAsync(input.AccountId, ct);

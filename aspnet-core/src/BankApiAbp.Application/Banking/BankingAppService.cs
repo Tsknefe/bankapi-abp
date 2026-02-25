@@ -6,6 +6,7 @@ using Volo.Abp.Application.Services;
 using Volo.Abp.Domain.Repositories;
 using BankApiAbp.Banking.Infrastructure;
 using Microsoft.AspNetCore.Http;
+using Volo.Abp.DistributedLocking;
 
 namespace BankApiAbp.Banking;
 
@@ -21,6 +22,7 @@ public partial class BankingAppService : ApplicationService, IBankingAppService
     private readonly RowLockHelper _rowLock;
     private readonly IdempotencyGate _idem;
     private readonly IHttpContextAccessor _http;
+    private readonly IAbpDistributedLock _distributedLock;
 
     public BankingAppService(
         IRepository<Customer, Guid> customers,
@@ -31,7 +33,8 @@ public partial class BankingAppService : ApplicationService, IBankingAppService
         RetryExecutor retry,
         RowLockHelper rowLock,
         IdempotencyGate idem,
-        IHttpContextAccessor http)
+        IHttpContextAccessor http,
+        IAbpDistributedLock distributedLock)
     {
         _customers = customers;
         _accounts = accounts;
@@ -43,5 +46,7 @@ public partial class BankingAppService : ApplicationService, IBankingAppService
         _rowLock = rowLock;
         _idem = idem;
         _http = http;
+
+        _distributedLock = distributedLock;
     }
 }
