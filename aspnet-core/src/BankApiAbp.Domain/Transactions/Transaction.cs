@@ -1,11 +1,12 @@
 ﻿using System;
+using BankApiAbp.Banking;
 using Volo.Abp.Domain.Entities.Auditing;
 
 namespace BankApiAbp.Transactions;
 
-public class Transaction : AuditedAggregateRoot<Guid>
+public class Transaction : FullAuditedAggregateRoot<Guid>
 {
-    public TransactionType Type { get; private set; }
+    public TransactionType TxType { get; private set; }
     public decimal Amount { get; private set; }
     public string? Description { get; private set; }
 
@@ -15,29 +16,21 @@ public class Transaction : AuditedAggregateRoot<Guid>
 
     private Transaction() { }
 
-    public Transaction(
-        Guid id,
-        TransactionType type,
-        decimal amount,
-        string? description,
-        Guid? accountId,
-        Guid? debitCardId,
-        Guid? creditCardId) : base(id)
+    public Transaction(Guid id, TransactionType txType, decimal amount, string? description,
+        Guid? accountId = null, Guid? debitCardId = null, Guid? creditCardId = null)
+        : base(id)
     {
-        if (amount <= 0) throw new ArgumentException("Amount must be > 0.");
+        if (amount <= 0) throw new ArgumentException("Amount must be > 0");
 
-        var filled = 0;
-        if (accountId.HasValue) filled++;
-        if (debitCardId.HasValue) filled++;
-        if (creditCardId.HasValue) filled++;
-        if (filled != 1) throw new ArgumentException("Exactly one source must be set.");
-
-        Type = type;
+        TxType = txType;
         Amount = amount;
         Description = description;
 
         AccountId = accountId;
         DebitCardId = debitCardId;
         CreditCardId = creditCardId;
+
+        if (AccountId == null && DebitCardId == null && CreditCardId == null)
+            throw new ArgumentException("At least one owner must be set (Account/DebitCard/CreditCard).");
     }
 }

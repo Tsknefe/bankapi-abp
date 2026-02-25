@@ -30,7 +30,13 @@ using Volo.Abp.Swashbuckle;
 using Volo.Abp.UI.Navigation.Urls;
 using Volo.Abp.VirtualFileSystem;
 using OpenIddict.Abstractions;
+using Volo.Abp.AspNetCore.Mvc.AntiForgery;
 
+using StackExchange.Redis;
+using Volo.Abp.Caching;
+using Volo.Abp.DistributedLocking;
+using Medallion.Threading;
+using Medallion.Threading.Redis;
 
 namespace BankApiAbp;
 
@@ -43,7 +49,8 @@ namespace BankApiAbp;
     typeof(AbpAspNetCoreMvcUiLeptonXLiteThemeModule),
     typeof(AbpAccountWebOpenIddictModule),
     typeof(AbpAspNetCoreSerilogModule),
-    typeof(AbpSwashbuckleModule)
+    typeof(AbpSwashbuckleModule),
+    typeof(AbpDistributedLockingModule)
 )]
 public class BankApiAbpHttpApiHostModule : AbpModule
 {
@@ -72,17 +79,57 @@ public class BankApiAbpHttpApiHostModule : AbpModule
         ConfigureVirtualFileSystem(context);
         ConfigureCors(context, configuration);
         ConfigureSwaggerServices(context, configuration);
+
+        ConfigureRedis(context, configuration);
+
         Configure<OpenIddictServerBuilder>(builder =>
         {
             builder.AddDevelopmentEncryptionCertificate()
                    .AddDevelopmentSigningCertificate();
         });
 
+        Configure<AbpAntiForgeryOptions>(options =>
+        {
+            options.AutoValidate = false;
+        });
+    }
+
+    private void ConfigureRedis(ServiceConfigurationContext context, IConfiguration configuration)
+    {
+        var redisCfg = configuration["Redis:Configuration"];
+
+        if (string.IsNullOrWhiteSpace(redisCfg))
+            return;
+
+        context.Services.AddSingleton<IConnectionMultiplexer>(_ =>
+            ConnectionMultiplexer.Connect(redisCfg));
+
+        Configure<AbpDistributedCacheOptions>(options =>
+        {
+            options.KeyPrefix = "BankApiAbp:";
+        });
+
+        context.Services.AddStackExchangeRedisCache(options =>
+        {
+            options.Configuration = redisCfg;
+        });
+
+        Configure<AbpDistributedLockOptions>(options =>
+        {
+            options.KeyPrefix = "BankApiAbp:";
+        });
+
+        context.Services.AddSingleton<IDistributedLockProvider>(sp =>
+        {
+            var mux = sp.GetRequiredService<IConnectionMultiplexer>();
+            return new RedisDistributedSynchronizationProvider(mux.GetDatabase());
+        });
     }
 
     private void ConfigureAuthentication(ServiceConfigurationContext context)
     {
         context.Services.ForwardIdentityAuthenticationForBearer(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
+
         context.Services.Configure<AbpClaimsPrincipalFactoryOptions>(options =>
         {
             options.IsDynamicClaimsEnabled = true;
@@ -124,17 +171,16 @@ public class BankApiAbpHttpApiHostModule : AbpModule
             Configure<AbpVirtualFileSystemOptions>(options =>
             {
                 options.FileSets.ReplaceEmbeddedByPhysical<BankApiAbpDomainSharedModule>(
-                    Path.Combine(hostingEnvironment.ContentRootPath,
-                        $"..{Path.DirectorySeparatorChar}BankApiAbp.Domain.Shared"));
+                    Path.Combine(hostingEnvironment.ContentRootPath, $"..{Path.DirectorySeparatorChar}BankApiAbp.Domain.Shared"));
+
                 options.FileSets.ReplaceEmbeddedByPhysical<BankApiAbpDomainModule>(
-                    Path.Combine(hostingEnvironment.ContentRootPath,
-                        $"..{Path.DirectorySeparatorChar}BankApiAbp.Domain"));
+                    Path.Combine(hostingEnvironment.ContentRootPath, $"..{Path.DirectorySeparatorChar}BankApiAbp.Domain"));
+
                 options.FileSets.ReplaceEmbeddedByPhysical<BankApiAbpApplicationContractsModule>(
-                    Path.Combine(hostingEnvironment.ContentRootPath,
-                        $"..{Path.DirectorySeparatorChar}BankApiAbp.Application.Contracts"));
+                    Path.Combine(hostingEnvironment.ContentRootPath, $"..{Path.DirectorySeparatorChar}BankApiAbp.Application.Contracts"));
+
                 options.FileSets.ReplaceEmbeddedByPhysical<BankApiAbpApplicationModule>(
-                    Path.Combine(hostingEnvironment.ContentRootPath,
-                        $"..{Path.DirectorySeparatorChar}BankApiAbp.Application"));
+                    Path.Combine(hostingEnvironment.ContentRootPath, $"..{Path.DirectorySeparatorChar}BankApiAbp.Application"));
             });
         }
     }
@@ -153,7 +199,7 @@ public class BankApiAbpHttpApiHostModule : AbpModule
             configuration["AuthServer:Authority"]!,
             new Dictionary<string, string>
             {
-                    {"BankApiAbp", "BankApiAbp API"}
+                {"BankApiAbp", "BankApiAbp API"}
             },
             options =>
             {
@@ -211,6 +257,7 @@ public class BankApiAbpHttpApiHostModule : AbpModule
         {
             app.UseMultiTenancy();
         }
+
         app.UseUnitOfWork();
         app.UseDynamicClaims();
         app.UseAuthorization();
@@ -225,7 +272,7 @@ public class BankApiAbpHttpApiHostModule : AbpModule
             c.OAuthScopes("BankApiAbp");
             c.OAuthAdditionalQueryStringParams(new Dictionary<string, string>
             {
-                ["audience"]="BankApiAbp"
+                ["audience"] = "BankApiAbp"
             });
             c.OAuthUsePkce();
         });

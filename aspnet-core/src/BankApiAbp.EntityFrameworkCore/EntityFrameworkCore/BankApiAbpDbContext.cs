@@ -1,4 +1,6 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using BankApiAbp.Cards;
+using BankApiAbp.Entities;
+using Microsoft.EntityFrameworkCore;
 using Volo.Abp.AuditLogging.EntityFrameworkCore;
 using Volo.Abp.BackgroundJobs.EntityFrameworkCore;
 using Volo.Abp.Data;
@@ -47,6 +49,12 @@ public class BankApiAbpDbContext :
     public DbSet<IdentityLinkUser> LinkUsers { get; set; }
     public DbSet<IdentityUserDelegation> UserDelegations { get; set; }
     public DbSet<IdentitySession> Sessions { get; set; }
+    public DbSet<Customer> Customers { get; set; }
+    public DbSet<Account> Accounts { get; set; }
+    public DbSet<DebitCard> DebitCards { get; set; }
+    public DbSet<CreditCard> CreditCards { get; set; }
+    public DbSet<BankApiAbp.Transactions.Transaction> Transactions { get; set; }
+
     // Tenant Management
     public DbSet<Tenant> Tenants { get; set; }
     public DbSet<TenantConnectionString> TenantConnectionStrings { get; set; }
@@ -73,12 +81,14 @@ public class BankApiAbpDbContext :
         builder.ConfigureOpenIddict();
         builder.ConfigureFeatureManagement();
         builder.ConfigureTenantManagement();
+        builder.ConfigureBankApiAbp();
+        builder.ConfigureBanking();
 
         /* Configure your own tables/entities inside here */
 
         //builder.Entity<YourEntity>(b =>
         //{
-        //    b.ToTable(BankApiAbpConsts.DbTablePrefix + "YourEntities", BankApiAbpConsts.DbSchema);
+        //    b.ToTable(BankApiAbpConsts.DbTablePrefix + "YourEntities", BankApiAbpC    onsts.DbSchema);
         //    b.ConfigureByConvention(); //auto configure for the base class props
         //    //...
         //});
