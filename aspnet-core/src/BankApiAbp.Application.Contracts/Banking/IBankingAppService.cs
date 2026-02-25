@@ -1,6 +1,8 @@
-﻿using System.Threading.Tasks;
-using Volo.Abp.Application.Services;
+﻿using System;
+using System.Threading.Tasks;
 using BankApiAbp.Banking.Dtos;
+using Volo.Abp.Application.Dtos;
+using Volo.Abp.Application.Services;
 
 namespace BankApiAbp.Banking;
 
@@ -13,7 +15,27 @@ public interface IBankingAppService : IApplicationService
 
     Task DepositAsync(DepositDto input);
     Task WithdrawAsync(WithdrawDto input);
+
     Task DebitCardSpendAsync(CardSpendDto input);
     Task CreditCardSpendAsync(CardSpendDto input);
     Task CreditCardPayAsync(CreditCardPayDto input);
+
+    Task<AccountDto> GetAccountAsync(Guid id);
+    Task<CreditCardDto> GetCreditCardDto(string cardNo);
+
+    Task<PagedResultDto<TransactionDto>> GetTransactionsAsync(GetTransactionsInput input);
+
+    Task<AccountSummaryDto> GetAccountSummaryAsync(Guid accountId);
+    Task<PagedResultDto<TransactionDto>> GetAccountStatementAsync(GetAccountStatementInput input);
+
+    Task<CardSpendSummaryDto> GetDebitCardSpendSummaryAsync(string cardNo);
+    Task<CardSpendSummaryDto> GetCreditCardSpendSummaryAsync(string cardNo);
+
+    Task<PagedResultDto<CustomerListItemDto>> GetMyCustomersAsync(CustomerListInput input);
+    Task<PagedResultDto<AccountListItemDto>> GetMyAccountsAsync(MyAccountsInput input);
+    Task<PagedResultDto<DebitCardListItemDto>> GetMyDebitCardsAsync(MyDebitCardsInput input);
+    Task<PagedResultDto<CreditCardListItemDto>> GetMyCreditCardsAsync(MyCreditCardsInput input);
+    Task<PagedResultDto<TransactionListItemDto>> GetMyTransactionsAsync(MyTransactionsInput input);
+
+    Task<BankingSummaryDto> GetMySummaryAsync(int lastTxCount = 10);
 }

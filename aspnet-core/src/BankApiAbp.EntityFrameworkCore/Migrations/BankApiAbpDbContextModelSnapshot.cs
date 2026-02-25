@@ -27,7 +27,6 @@ namespace BankApiAbp.Migrations
             modelBuilder.Entity("BankApiAbp.Cards.CreditCard", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<string>("CardNo")
@@ -56,10 +55,10 @@ namespace BankApiAbp.Migrations
                     b.Property<Guid>("CustomerId")
                         .HasColumnType("uuid");
 
-                    b.Property<string>("Cvv")
+                    b.Property<string>("CvvHash")
                         .IsRequired()
-                        .HasMaxLength(4)
-                        .HasColumnType("character varying(4)");
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
                     b.Property<Guid?>("DeleterId")
                         .HasColumnType("uuid")
@@ -97,6 +96,12 @@ namespace BankApiAbp.Migrations
                     b.Property<decimal>("Limit")
                         .HasColumnType("numeric(18,2)");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("bytea");
+
                     b.HasKey("Id");
 
                     b.HasIndex("CardNo")
@@ -110,7 +115,6 @@ namespace BankApiAbp.Migrations
             modelBuilder.Entity("BankApiAbp.Cards.DebitCard", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("AccountId")
@@ -136,10 +140,13 @@ namespace BankApiAbp.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("CreatorId");
 
-                    b.Property<string>("Cvv")
+                    b.Property<string>("CvvHash")
                         .IsRequired()
-                        .HasMaxLength(4)
-                        .HasColumnType("character varying(4)");
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<decimal>("DailyLimit")
+                        .HasColumnType("numeric");
 
                     b.Property<Guid?>("DeleterId")
                         .HasColumnType("uuid")
@@ -174,6 +181,12 @@ namespace BankApiAbp.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("LastModifierId");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("bytea");
+
                     b.HasKey("Id");
 
                     b.HasIndex("AccountId");
@@ -187,7 +200,6 @@ namespace BankApiAbp.Migrations
             modelBuilder.Entity("BankApiAbp.Entities.Account", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<int>("AccountType")
@@ -254,6 +266,12 @@ namespace BankApiAbp.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("bytea");
+
                     b.HasKey("Id");
 
                     b.HasIndex("CustomerId");
@@ -267,7 +285,6 @@ namespace BankApiAbp.Migrations
             modelBuilder.Entity("BankApiAbp.Entities.Customer", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<DateTime>("BirthDate")
@@ -330,6 +347,9 @@ namespace BankApiAbp.Migrations
                         .HasMaxLength(11)
                         .HasColumnType("character varying(11)");
 
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
                     b.HasKey("Id");
 
                     b.HasIndex("TcNo")
@@ -341,7 +361,6 @@ namespace BankApiAbp.Migrations
             modelBuilder.Entity("BankApiAbp.Transactions.Transaction", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<Guid?>("AccountId")

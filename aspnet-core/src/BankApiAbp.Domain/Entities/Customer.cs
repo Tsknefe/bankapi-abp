@@ -5,6 +5,7 @@ namespace BankApiAbp.Entities;
 
 public class Customer : FullAuditedAggregateRoot<Guid>
 {
+    public Guid UserId { get;  private set; }
     public string Name { get; private set; } = default!;
     public string TcNo { get; private set; } = default!;
     public DateTime BirthDate { get; private set; }
@@ -12,9 +13,10 @@ public class Customer : FullAuditedAggregateRoot<Guid>
 
     private Customer() { }
 
-    public Customer(Guid id, string name, string tcNo, DateTime birthDate, string birthPlace)
+    public Customer(Guid id,Guid userId, string name, string tcNo, DateTime birthDate, string birthPlace)
         : base(id)
     {
+        UserId = userId;
         Name = name;
         TcNo = tcNo;
         BirthDate = birthDate;
