@@ -59,6 +59,14 @@ public partial class BankingAppService
             {
                 var card = await GetCreditCardOwnedByCardNoAsync(cardNo);
 
+                await using var handle = await _distributedLock.TryAcquireAsync(
+                    $"creditcard:{card.Id}",
+                    TimeSpan.FromSeconds(10)
+                );
+
+                if (handle == null)
+                    throw new UserFriendlyException("Kart şu anda başka bir işlem tarafından kullanılıyor. Lütfen tekrar deneyin.");
+
                 var now = Clock.Now;
                 card.EnsureUsable(now);
                 card.VerifyCvv(input.Cvv);
@@ -104,6 +112,14 @@ public partial class BankingAppService
 
                 card.EnsureUsable(now);
                 card.VerifyCvv(input.Cvv);
+
+                await using var handle = await _distributedLock.TryAcquireAsync(
+                    $"account:{input.AccountId}",
+                    TimeSpan.FromSeconds(10)
+                );
+
+                if (handle == null)
+                    throw new UserFriendlyException("Hesap şu anda başka bir işlem tarafından kullanılıyor. Lütfen tekrar deneyin.");
 
                 var account = await GetAccountOwnedAsync(input.AccountId);
 
