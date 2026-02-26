@@ -13,6 +13,8 @@ using Volo.Abp.SettingManagement.EntityFrameworkCore;
 using Volo.Abp.TenantManagement.EntityFrameworkCore;
 using Volo.Abp.EntityFrameworkCore.PostgreSql;
 using Volo.Abp.Timing;
+using BankApiAbp.Banking;
+using Volo.Abp.Domain.Repositories.EntityFrameworkCore;
 
 namespace BankApiAbp.EntityFrameworkCore;
 
@@ -42,6 +44,8 @@ public class BankApiAbpEntityFrameworkCoreModule : AbpModule
                 /* Remove "includeAllEntities: true" to create
                  * default repositories only for aggregate roots */
             options.AddDefaultRepositories(includeAllEntities: true);
+            options.AddRepository<BankingIdempotencyRecord, EfCoreRepository<BankApiAbpDbContext, BankingIdempotencyRecord, Guid>>();
+
         });
 
         Configure<AbpDbContextOptions>(options =>

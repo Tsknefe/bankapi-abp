@@ -1,4 +1,5 @@
-﻿using BankApiAbp.Cards;
+﻿using BankApiAbp.Banking;
+using BankApiAbp.Cards;
 using BankApiAbp.Entities;
 using Microsoft.EntityFrameworkCore;
 using Volo.Abp.AuditLogging.EntityFrameworkCore;
@@ -14,6 +15,7 @@ using Volo.Abp.PermissionManagement.EntityFrameworkCore;
 using Volo.Abp.SettingManagement.EntityFrameworkCore;
 using Volo.Abp.TenantManagement;
 using Volo.Abp.TenantManagement.EntityFrameworkCore;
+using BankApiAbp.Banking;
 
 namespace BankApiAbp.EntityFrameworkCore;
 
@@ -55,9 +57,9 @@ public class BankApiAbpDbContext :
     public DbSet<CreditCard> CreditCards { get; set; }
     public DbSet<BankApiAbp.Transactions.Transaction> Transactions { get; set; }
 
-    // Tenant Management
     public DbSet<Tenant> Tenants { get; set; }
     public DbSet<TenantConnectionString> TenantConnectionStrings { get; set; }
+    public DbSet<BankingIdempotencyRecord> BankingIdempotencyRecords { get; set; }
 
     #endregion
 

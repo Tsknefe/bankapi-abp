@@ -1,4 +1,5 @@
-﻿using BankApiAbp.Cards;
+﻿using BankApiAbp.Banking;
+using BankApiAbp.Cards;
 using BankApiAbp.Entities;
 using BankApiAbp.Transactions;
 using Microsoft.EntityFrameworkCore;
@@ -107,5 +108,18 @@ public static class BankApiAbpDbContextModelCreatingExtensions
             b.HasCheckConstraint("CK_Transactions_Owner",
                 "\"AccountId\" IS NOT NULL OR \"DebitCardId\" IS NOT NULL OR \"CreditCardId\" IS NOT NULL");
         });
+
+        builder.Entity<BankingIdempotencyRecord>(b =>
+        {
+            b.ToTable("BankingIdempotencyRecords");
+            b.ConfigureByConvention();
+
+            b.HasIndex(x => new { x.UserId, x.Operation, x.IdempotencyKey }).IsUnique();
+
+            b.Property(x => x.Operation).IsRequired().HasMaxLength(128);
+            b.Property(x => x.IdempotencyKey).IsRequired().HasMaxLength(128);
+            b.Property(x => x.RequestHash).HasMaxLength(256);
+            b.Property(x => x.Status).IsRequired().HasMaxLength(32);
+        }); 
     }
 }

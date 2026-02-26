@@ -4,17 +4,22 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Volo.Abp;
+using Volo.Abp.DependencyInjection;
 using Volo.Abp.Domain.Repositories;
+using Volo.Abp.Uow;
 
 namespace BankApiAbp.Banking;
 
-public class IdempotencyGate
+public class IdempotencyGate : ITransientDependency
 {
     private readonly IRepository<BankingIdempotencyRecord, Guid> _repo;
+    private readonly IUnitOfWorkManager _uow;
 
-    public IdempotencyGate(IRepository<BankingIdempotencyRecord, Guid> repo)
+    public IdempotencyGate(IRepository<BankingIdempotencyRecord, Guid> repo,
+        IUnitOfWorkManager uow)
     {
         _repo = repo;
+        _uow = uow;
     }
 
     public async Task<(bool IsDuplicate, BankingIdempotencyRecord Record)> TryBeginAsync(
@@ -24,19 +29,28 @@ public class IdempotencyGate
 
         try
         {
+            using var u1 = _uow.Begin(requiresNew:true, isTransactional:false);
+
             await _repo.InsertAsync(rec, autoSave: true);
+
+            await u1.CompleteAsync();
             return (false, rec);
         }
         catch (DbUpdateException ex) when (IsUniqueViolation(ex))
         {
-            var existing = await _repo.FirstOrDefaultAsync(x =>
-                x.UserId == userId && x.Operation == operation && x.IdempotencyKey == key);
-
-            if (existing == null)
-                throw; 
-
-            return (true, existing);
+           
         }
+        using var u2 = _uow.Begin(requiresNew:true, isTransactional:false);
+        var existing = await _repo.FirstOrDefaultAsync(x => x.UserId == userId && x.Operation == operation && x.IdempotencyKey == key); 
+        
+        await u2.CompleteAsync();
+
+        if (existing == null) 
+        {
+            throw new BusinessException("IDEMPOTENCY_RECORD_NOT_FOUND");
+        }
+        return (true, existing); 
+
     }
 
     public async Task<string> GetOrThrowDuplicateResponseAsync(BankingIdempotencyRecord existing)

@@ -61,6 +61,8 @@ public partial class BankingAppService
 
         if (isDuplicate)
         {
+            if (record.Status == "Completed" && record.ResponseStatusCode == 204)
+                return;
             await _idem.GetOrThrowDuplicateResponseAsync(record);
             return;
         }
