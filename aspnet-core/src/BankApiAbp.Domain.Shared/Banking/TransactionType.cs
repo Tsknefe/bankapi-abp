@@ -6,5 +6,7 @@ public enum TransactionType
     Withdraw = 1,
     DebitCardSpend = 2,
     CreditCardSpend = 3,
-    CreditCardPayment = 4
+    CreditCardPayment = 4,
+    TransferOut = 50,
+    TransferIn = 51
 }
