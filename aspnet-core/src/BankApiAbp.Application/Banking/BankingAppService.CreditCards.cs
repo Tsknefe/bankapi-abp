@@ -51,29 +51,47 @@ public partial class BankingAppService
     [Authorize(BankingPermissions.CreditCards.Spend)]
     public async Task CreditCardSpendAsync(CardSpendDto input)
     {
+        var userId = CurrentUserIdOrThrow();
+        var operation = "creditcards.spend";
+        var key = GetIdempotencyKeyOrThrow(operation);
+
         var cardNo = NormalizeCardNo(input.CardNo);
+        var requestHash = BuildRequestHash(cardNo, input.Amount, input.Description, input.Cvv);
 
-        for (var attempt = 1; attempt <= 3; attempt++)
+        var (isDuplicate, record) = await _idem.TryBeginAsync(userId, operation, key, requestHash);
+
+        if (isDuplicate)
         {
-            try
+            if (record.Status == "Completed" && (record.ResponseStatusCode == 204 || record.ResponseStatusCode == 200))
+                return;
+
+            await _idem.GetOrThrowDuplicateResponseAsync(record);
+            return;
+        }
+
+        try
+        {
+            var card = await GetCreditCardOwnedByCardNoAsync(cardNo);
+
+            await using var handle = await _distributedLock.TryAcquireAsync(
+                $"creditcard:{card.Id}",
+                TimeSpan.FromSeconds(10)
+            );
+
+            if (handle == null)
+                throw new UserFriendlyException("Kart şu anda başka bir işlem tarafından kullanılıyor. Lütfen tekrar deneyin.");
+
+            await _retry.ExecuteAsync(async ct =>
             {
-                var card = await GetCreditCardOwnedByCardNoAsync(cardNo);
-
-                await using var handle = await _distributedLock.TryAcquireAsync(
-                    $"creditcard:{card.Id}",
-                    TimeSpan.FromSeconds(10)
-                );
-
-                if (handle == null)
-                    throw new UserFriendlyException("Kart şu anda başka bir işlem tarafından kullanılıyor. Lütfen tekrar deneyin.");
+                var lockedCard = await GetCreditCardOwnedByCardNoAsync(cardNo);
 
                 var now = Clock.Now;
-                card.EnsureUsable(now);
-                card.VerifyCvv(input.Cvv);
+                lockedCard.EnsureUsable(now);
+                lockedCard.VerifyCvv(input.Cvv);
 
-                card.Spend(input.Amount);
+                lockedCard.Spend(input.Amount);
 
-                await _creditCards.UpdateAsync(card, autoSave: true);
+                await _creditCards.UpdateAsync(lockedCard, autoSave: true);
 
                 await _tx.InsertAsync(new Transaction(
                     GuidGenerator.Create(),
@@ -82,62 +100,85 @@ public partial class BankingAppService
                     input.Description,
                     null,
                     null,
-                    card.Id
+                    lockedCard.Id
                 ), autoSave: true);
+            });
 
-                return;
-            }
-            catch (Exception ex) when (IsConcurrency(ex))
-            {
-                if (attempt == 3) throw ConcurrencyFriendly();
-                await SmallBackoffAsync(attempt);
-            }
+            await _idem.CompleteAsync(record, new { Ok = true }, 204); 
+        }
+        catch (Exception ex)
+        {
+            await _idem.FailAsync(record, ex);
+            throw;
         }
     }
+
 
     [Authorize(BankingPermissions.CreditCards.Pay)]
     public async Task CreditCardPayAsync(CreditCardPayDto input)
     {
-        if (input.Amount <= 0)
-            throw new BusinessException("Amount must be greater than zero");
+        var userId = CurrentUserIdOrThrow();
+        var operation = "creditcards.pay";
+        var key = GetIdempotencyKeyOrThrow(operation);
 
         var cardNo = NormalizeCardNo(input.CardNo);
+        var requestHash = BuildRequestHash(cardNo, input.AccountId, input.Amount, input.Description /*, input.Cvv*/);
 
-        for (var attempt = 1; attempt <= 3; attempt++)
+        var (isDuplicate, record) = await _idem.TryBeginAsync(userId, operation, key, requestHash);
+
+        if (isDuplicate)
         {
-            try
+            if (record.Status == "Completed" && (record.ResponseStatusCode == 204 || record.ResponseStatusCode == 200))
+                return;
+
+            await _idem.GetOrThrowDuplicateResponseAsync(record);
+            return;
+        }
+
+        try
+        {
+            var card = await GetCreditCardOwnedByCardNoAsync(cardNo);
+            var now = Clock.Now;
+
+            card.EnsureUsable(now);
+            card.VerifyCvv(input.Cvv);
+
+            await using var accountHandle = await _distributedLock.TryAcquireAsync(
+                $"account:{input.AccountId}",
+                TimeSpan.FromSeconds(10)
+            );
+            if (accountHandle == null)
+                throw new UserFriendlyException("Hesap şu anda başka bir işlem tarafından kullanılıyor. Lütfen tekrar deneyin.");
+
+            await using var cardHandle = await _distributedLock.TryAcquireAsync(
+                $"creditcard:{card.Id}",
+                TimeSpan.FromSeconds(10)
+            );
+            if (cardHandle == null)
+                throw new UserFriendlyException("Kart şu anda başka bir işlem tarafından kullanılıyor. Lütfen tekrar deneyin.");
+
+            await _retry.ExecuteAsync(async ct =>
             {
-                var card = await GetCreditCardOwnedByCardNoAsync(cardNo);
-                var now = Clock.Now;
+                var account = await _rowLock.LockAccountForUpdateAsync(input.AccountId, ct);
+                await EnsureAccountOwnedAsync(account.Id, ct);
 
-                card.EnsureUsable(now);
-                card.VerifyCvv(input.Cvv);
-
-                await using var handle = await _distributedLock.TryAcquireAsync(
-                    $"account:{input.AccountId}",
-                    TimeSpan.FromSeconds(10)
-                );
-
-                if (handle == null)
-                    throw new UserFriendlyException("Hesap şu anda başka bir işlem tarafından kullanılıyor. Lütfen tekrar deneyin.");
-
-                var account = await GetAccountOwnedAsync(input.AccountId);
+                var lockedCard = await GetCreditCardOwnedByCardNoAsync(cardNo);
 
                 if (account.Balance < input.Amount)
-                    throw new BusinessException("InsufficientBalance")
+                    throw new BusinessException("INSUFFICIENT_BALANCE")
                         .WithData("Balance", account.Balance)
                         .WithData("Amount", input.Amount);
 
-                if (card.CurrentDebt < input.Amount)
-                    throw new BusinessException("PaymentExceedsDebt")
-                        .WithData("CurrentDebt", card.CurrentDebt)
+                if (lockedCard.CurrentDebt < input.Amount)
+                    throw new BusinessException("PAYMENT_EXCEEDS_DEBT")
+                        .WithData("CurrentDebt", lockedCard.CurrentDebt)
                         .WithData("Amount", input.Amount);
 
                 account.Withdraw(input.Amount);
-                card.Pay(input.Amount);
+                lockedCard.Pay(input.Amount);
 
                 await _accounts.UpdateAsync(account, autoSave: true);
-                await _creditCards.UpdateAsync(card, autoSave: true);
+                await _creditCards.UpdateAsync(lockedCard, autoSave: true);
 
                 await _tx.InsertAsync(new Transaction(
                     GuidGenerator.Create(),
@@ -146,18 +187,19 @@ public partial class BankingAppService
                     input.Description,
                     account.Id,
                     null,
-                    card.Id
+                    lockedCard.Id
                 ), autoSave: true);
+            });
 
-                return;
-            }
-            catch (Exception ex) when (IsConcurrency(ex))
-            {
-                if (attempt == 3) throw ConcurrencyFriendly();
-                await SmallBackoffAsync(attempt);
-            }
+            await _idem.CompleteAsync(record, new { Ok = true }, 204);
+        }
+        catch (Exception ex)
+        {
+            await _idem.FailAsync(record, ex);
+            throw;
         }
     }
+    
 
     [Authorize(BankingPermissions.CreditCards.Read)]
     public async Task<CreditCardDto> GetCreditCardDto(string cardNo)

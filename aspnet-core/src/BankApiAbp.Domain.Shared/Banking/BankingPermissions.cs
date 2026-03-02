@@ -20,9 +20,11 @@ public static class BankingPermissions
         public const string List = Default + ".List";
         public const string Deposit = Default + ".Deposit";
         public const string Withdraw = Default + ".Withdraw";
+        public const string Transfer = Default + ".Transfer";
         public const string Statement = Default + ".Statement";
         public const string Summary = Default + ".Summary";
     }
+
 
     public static class DebitCards
     {

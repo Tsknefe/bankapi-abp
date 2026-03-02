@@ -37,6 +37,7 @@ using Volo.Abp.Caching;
 using Volo.Abp.DistributedLocking;
 using Medallion.Threading;
 using Medallion.Threading.Redis;
+using Volo.Abp.AspNetCore.ExceptionHandling;
 
 namespace BankApiAbp;
 
@@ -91,6 +92,12 @@ public class BankApiAbpHttpApiHostModule : AbpModule
         Configure<AbpAntiForgeryOptions>(options =>
         {
             options.AutoValidate = false;
+        });
+
+        Configure<AbpExceptionHttpStatusCodeOptions>(options =>
+        {
+            options.Map("IDEMPOTENCY_KEY_REUSE_WITH_DIFFERENT_PAYLOAD", System.Net.HttpStatusCode.Conflict);
+            options.Map("IDEMPOTENCY_IN_PROGRESS", System.Net.HttpStatusCode.Conflict);
         });
     }
 

@@ -49,7 +49,7 @@ public partial class BankingAppService
     }
 
     [Authorize(BankingPermissions.Accounts.Deposit)]
-    public async Task DepositAsync(DepositDto input)
+    public async Task<DepositResultDto> DepositAsync(DepositDto input)
     {
         var userId = CurrentUserIdOrThrow();
         var operation = "accounts.deposit";
@@ -61,22 +61,36 @@ public partial class BankingAppService
 
         if (isDuplicate)
         {
-            if (record.Status == "Completed" && record.ResponseStatusCode == 204)
-                return;
+            if (!string.Equals(record.RequestHash, requestHash, StringComparison.Ordinal))
+            {
+                throw new BusinessException("IDEMPOTENCY_KEY_REUSE_WITH_DIFFERENT_PAYLOAD")
+                    .WithData("message", "Aynı Idempotency-Key farklı istek gövdesi ile kullanılamaz.");
+            }
+
+            if (record.Status == "Completed" && record.ResponseJson != null)
+            {
+                var cached = JsonSerializer.Deserialize<DepositResultDto>(record.ResponseJson);
+                if (cached != null) return cached;
+            }
+
             await _idem.GetOrThrowDuplicateResponseAsync(record);
-            return;
+            
+            throw new BusinessException("IDEMPOTENCY_UNKNOWN_STATE");
         }
 
         try
         {
             await using var handle = await _distributedLock.TryAcquireAsync(
-                    $"account:{input.AccountId}",
-                    TimeSpan.FromSeconds(10)
+                $"account:{input.AccountId}",
+                TimeSpan.FromSeconds(10)
             );
 
             if (handle == null)
                 throw new UserFriendlyException("Hesap şu anda başka bir işlem tarafından kullanılıyor. Lütfen tekrar deneyin.");
-           
+
+            Guid txId = default;
+            decimal newBalance = 0m;
+
             await _retry.ExecuteAsync(async ct =>
             {
                 var account = await _rowLock.LockAccountForUpdateAsync(input.AccountId, ct);
@@ -85,8 +99,9 @@ public partial class BankingAppService
                 account.Deposit(input.Amount);
                 await _accounts.UpdateAsync(account, autoSave: true);
 
+                txId = GuidGenerator.Create();
                 await _tx.InsertAsync(new Transaction(
-                    GuidGenerator.Create(),
+                    txId,
                     TransactionType.Deposit,
                     input.Amount,
                     input.Description,
@@ -94,9 +109,21 @@ public partial class BankingAppService
                     null,
                     null
                 ), autoSave: true);
+
+                newBalance = account.Balance;
             });
 
-            await _idem.CompleteAsync(record, new { Ok = true }, 200);
+            var result = new DepositResultDto
+            {
+                TransactionId = txId,
+                AccountId = input.AccountId,
+                NewBalance = newBalance,
+                IdempotencyKey = key,
+                ProcessedAtUtc = Clock.Now
+            };
+
+            await _idem.CompleteAsync(record, result, 200);
+            return result;
         }
         catch (Exception ex)
         {
@@ -104,9 +131,8 @@ public partial class BankingAppService
             throw;
         }
     }
-
     [Authorize(BankingPermissions.Accounts.Withdraw)]
-    public async Task WithdrawAsync(WithdrawDto input)
+    public async Task<WithdrawResultDto> WithdrawAsync(WithdrawDto input)
     {
         var userId = CurrentUserIdOrThrow();
         var operation = "accounts.withdraw";
@@ -118,20 +144,36 @@ public partial class BankingAppService
 
         if (isDuplicate)
         {
+            if (!string.Equals(record.RequestHash, requestHash, StringComparison.Ordinal))
+            {
+                throw new BusinessException("IDEMPOTENCY_KEY_REUSE_WITH_DIFFERENT_PAYLOAD")
+                    .WithData("message", "Aynı Idempotency-Key farklı istek gövdesi ile kullanılamaz.");
+            }
+
+            if (record.Status == "Completed" && record.ResponseJson != null)
+            {
+                var cached = JsonSerializer.Deserialize<WithdrawResultDto>(record.ResponseJson);
+                if (cached != null) return cached;
+            }
+
             await _idem.GetOrThrowDuplicateResponseAsync(record);
-            return;
+
+            throw new BusinessException("IDEMPOTENCY_UNKNOWN_STATE");
         }
 
         try
         {
             await using var handle = await _distributedLock.TryAcquireAsync(
-                    $"account:{input.AccountId}",
-                    TimeSpan.FromSeconds(10)
+                $"account:{input.AccountId}",
+                TimeSpan.FromSeconds(10)
             );
 
             if (handle == null)
                 throw new UserFriendlyException("Hesap şu anda başka bir işlem tarafından kullanılıyor. Lütfen tekrar deneyin.");
-            
+
+            Guid txId = default;
+            decimal newBalance = 0m;
+
             await _retry.ExecuteAsync(async ct =>
             {
                 var account = await _rowLock.LockAccountForUpdateAsync(input.AccountId, ct);
@@ -140,8 +182,9 @@ public partial class BankingAppService
                 account.Withdraw(input.Amount);
                 await _accounts.UpdateAsync(account, autoSave: true);
 
+                txId = GuidGenerator.Create();
                 await _tx.InsertAsync(new Transaction(
-                    GuidGenerator.Create(),
+                    txId,
                     TransactionType.Withdraw,
                     input.Amount,
                     input.Description,
@@ -149,9 +192,21 @@ public partial class BankingAppService
                     null,
                     null
                 ), autoSave: true);
+
+                newBalance = account.Balance;
             });
 
-            await _idem.CompleteAsync(record, new { Ok = true }, 200);
+            var result = new WithdrawResultDto
+            {
+                TransactionId = txId,
+                AccountId = input.AccountId,
+                NewBalance = newBalance,
+                IdempotencyKey = key,
+                ProcessedAtUtc = Clock.Now
+            };
+
+            await _idem.CompleteAsync(record, result, 200);
+            return result;
         }
         catch (Exception ex)
         {
@@ -307,5 +362,143 @@ public partial class BankingAppService
             AccountType = acc.AccountType,
             IsActive = acc.IsActive
         };
+    }
+    [Authorize(BankingPermissions.Accounts.Transfer)]
+    public async Task<TransferResultDto> TransferAsync(TransferDto input)
+    {
+        var userId = CurrentUserIdOrThrow();
+        var operation = "accounts.transfer";
+        var key = GetIdempotencyKeyOrThrow(operation);
+
+        if (input.FromAccountId == input.ToAccountId)
+            throw new BusinessException("TRANSFER_SAME_ACCOUNT");
+
+        var requestHash = BuildRequestHash(
+            input.FromAccountId,
+            input.ToAccountId,
+            input.Amount,
+            input.Description
+        );
+
+        var (isDuplicate, record) =
+            await _idem.TryBeginAsync(userId, operation, key, requestHash);
+
+        if (isDuplicate)
+        {
+            if (!string.Equals(record.RequestHash, requestHash, StringComparison.Ordinal))
+            {
+                throw new BusinessException("IDEMPOTENCY_KEY_REUSE_WITH_DIFFERENT_PAYLOAD")
+                    .WithData("message", "Aynı Idempotency-Key farklı istek gövdesi ile kullanılamaz.");
+            }
+
+            if (record.Status == "Completed" && record.ResponseJson != null)
+            {
+                var cached = JsonSerializer.Deserialize<TransferResultDto>(record.ResponseJson);
+                if (cached != null) return cached;
+            }
+
+            await _idem.GetOrThrowDuplicateResponseAsync(record);
+            throw new BusinessException("IDEMPOTENCY_UNKNOWN_STATE");
+        }
+
+        try
+        {
+            _ = await GetAccountOwnedAsync(input.FromAccountId);
+            _ = await GetAccountOwnedAsync(input.ToAccountId);
+
+            var a = input.FromAccountId;
+            var b = input.ToAccountId;
+            var first = a.CompareTo(b) < 0 ? a : b;
+            var second = a.CompareTo(b) < 0 ? b : a;
+
+            await using var lock1 = await _distributedLock.TryAcquireAsync(
+                $"account:{first}",
+                TimeSpan.FromSeconds(10)
+            );
+            if (lock1 == null)
+                throw new UserFriendlyException("Hesap şu anda başka bir işlem tarafından kullanılıyor. Lütfen tekrar deneyin.");
+
+            await using var lock2 = await _distributedLock.TryAcquireAsync(
+                $"account:{second}",
+                TimeSpan.FromSeconds(10)
+            );
+            if (lock2 == null)
+                throw new UserFriendlyException("Hesap şu anda başka bir işlem tarafından kullanılıyor. Lütfen tekrar deneyin.");
+
+            Guid txOutId = default;
+            Guid txInId = default;
+            decimal fromNew = 0m;
+            decimal toNew = 0m;
+
+            await _retry.ExecuteAsync(async ct =>
+            {
+                var firstAcc = await _rowLock.LockAccountForUpdateAsync(first, ct);
+                var secondAcc = await _rowLock.LockAccountForUpdateAsync(second, ct);
+
+                var fromAcc = (input.FromAccountId == first) ? firstAcc : secondAcc;
+                var toAcc = (input.ToAccountId == first) ? firstAcc : secondAcc;
+
+                await EnsureAccountOwnedAsync(fromAcc.Id, ct);
+                await EnsureAccountOwnedAsync(toAcc.Id, ct);
+
+                if (fromAcc.Balance < input.Amount)
+                    throw new BusinessException("INSUFFICIENT_BALANCE")
+                        .WithData("Balance", fromAcc.Balance)
+                        .WithData("Amount", input.Amount);
+
+                fromAcc.Withdraw(input.Amount);
+                toAcc.Deposit(input.Amount);
+
+                await _accounts.UpdateAsync(fromAcc, autoSave: true);
+                await _accounts.UpdateAsync(toAcc, autoSave: true);
+
+                txOutId = GuidGenerator.Create();
+                txInId = GuidGenerator.Create();
+
+                await _tx.InsertAsync(new Transaction(
+                    txOutId,
+                    TransactionType.TransferOut,
+                    input.Amount,
+                    input.Description ?? $"Transfer to {toAcc.Iban}",
+                    fromAcc.Id,
+                    null,
+                    null
+                ), autoSave: true);
+
+                await _tx.InsertAsync(new Transaction(
+                    txInId,
+                    TransactionType.TransferIn,
+                    input.Amount,
+                    input.Description ?? $"Transfer from {fromAcc.Iban}",
+                    toAcc.Id,
+                    null,
+                    null
+                ), autoSave: true);
+
+                fromNew = fromAcc.Balance;
+                toNew = toAcc.Balance;
+            });
+
+            var result = new TransferResultDto
+            {
+                TransactionOutId = txOutId,
+                TransactionInId = txInId,
+                FromAccountId = input.FromAccountId,
+                ToAccountId = input.ToAccountId,
+                Amount = input.Amount,
+                FromNewBalance = fromNew,
+                ToNewBalance = toNew,
+                IdempotencyKey = key,
+                ProcessedAtUtc = Clock.Now
+            };
+
+            await _idem.CompleteAsync(record, result, 200);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            await _idem.FailAsync(record, ex);
+            throw;
+        }
     }
 }

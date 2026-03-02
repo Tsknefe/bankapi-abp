@@ -42,6 +42,7 @@ public class BankingPermissionDataSeedContributor : IDataSeedContributor, ITrans
             BankingPermissions.Accounts.Read,
             BankingPermissions.Accounts.List,
             BankingPermissions.Accounts.Deposit,
+            BankingPermissions.Accounts.Transfer,
             BankingPermissions.Accounts.Withdraw,
             BankingPermissions.Accounts.Statement,
             BankingPermissions.Accounts.Summary,
