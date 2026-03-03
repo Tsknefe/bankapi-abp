@@ -13,12 +13,13 @@ public interface IBankingAppService : IApplicationService
     Task<IdResponseDto> CreateDebitCardAsync(CreateDebitCardDto input);
     Task<IdResponseDto> CreateCreditCardAsync(CreateCreditCardDto input);
 
-    Task DepositAsync(DepositDto input);
-    Task WithdrawAsync(WithdrawDto input);
+    Task<DepositResultDto> DepositAsync(DepositDto input);
+    Task<WithdrawResultDto> WithdrawAsync(WithdrawDto input);
 
     Task DebitCardSpendAsync(CardSpendDto input);
     Task CreditCardSpendAsync(CardSpendDto input);
     Task CreditCardPayAsync(CreditCardPayDto input);
+    Task<TransferResultDto> TransferAsync(TransferDto input);
 
     Task<AccountDto> GetAccountAsync(Guid id);
     Task<CreditCardDto> GetCreditCardDto(string cardNo);

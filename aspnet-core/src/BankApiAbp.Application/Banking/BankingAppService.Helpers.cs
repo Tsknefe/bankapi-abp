@@ -8,6 +8,8 @@ using Volo.Abp.Authorization;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Users;
 using System.Threading;
+using System.Text;
+using System.Security.Cryptography;
 
 namespace BankApiAbp.Banking;
 
@@ -118,8 +120,21 @@ public partial class BankingAppService
             .WithData("operation", operation);
     }
 
-    private static string BuildRequestHash(Guid accountId, decimal amount, string? description)
-        => $"{accountId:N}|{amount}|{description}".GetHashCode().ToString();
+    private static string BuildRequestHash(params object?[] parts)
+    {
+        var payload = string.Join("|", parts.Select(p => p switch
+        {
+            null => "null",
+            Guid g => g.ToString("N"),
+            decimal d => d.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            DateTime dt => dt.ToUniversalTime().ToString("O"),
+            _ => p.ToString()
+        }));
+
+        using var sha = SHA256.Create();
+        var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(payload));
+        return Convert.ToHexString(bytes); 
+    }
     private async Task EnsureAccountOwnedAsync(Guid accountId, CancellationToken ct)
     {
         var userId = CurrentUserIdOrThrow();
@@ -138,5 +153,6 @@ public partial class BankingAppService
         if (!ok)
             throw new AbpAuthorizationException("Bu hesap size ait değil.");
     }
+
 
 }
