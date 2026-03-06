@@ -8,6 +8,7 @@ using BankApiAbp.Permissions;
 using BankApiAbp.Transactions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Logging;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Authorization;
@@ -20,7 +21,7 @@ public partial class BankingAppService
     public async Task<IdResponseDto> CreateAccountAsync(CreateAccountDto input)
     {
         var userId = CurrentUserIdOrThrow();
-        
+
         _ = await GetCustomerOwnedAsync(input.CustomerId);
 
         var accountsQ = await _accounts.GetQueryableAsync();
@@ -78,7 +79,7 @@ public partial class BankingAppService
             }
 
             await _idem.GetOrThrowDuplicateResponseAsync(record);
-            
+
             throw new BusinessException("IDEMPOTENCY_UNKNOWN_STATE");
         }
 
@@ -279,10 +280,24 @@ public partial class BankingAppService
         if (cached != null)
         {
             AccountSummaryCacheHitCounter.Add(1);
+
+            Logger.LogInformation(
+                "CACHE HIT -> AccountSummary accountId={AccountId} key={CacheKey}",
+                accountId,
+                cacheKey
+            );
+
             return cached;
         }
 
         AccountSummaryCacheMissCounter.Add(1);
+
+        Logger.LogInformation(
+                "CACHE MISS -> AccountSummary accountId={AccountId} key={CacheKey}",
+                accountId,
+                cacheKey
+            );
+
 
         var now = Clock.Now;
         var todayStart = now.Date;
@@ -350,10 +365,24 @@ public partial class BankingAppService
         if (cached != null)
         {
             AccountStatementCacheHitCounter.Add(1);
+
+            Logger.LogInformation(
+            "CACHE HIT -> AccountStatement accountId={AccountId} key={CacheKey}",
+            input.AccountId,
+            cacheKey
+            );
+
             return cached;
         }
 
         AccountStatementCacheMissCounter.Add(1);
+
+        Logger.LogInformation(
+        "CACHE MISS -> AccountStatement accountId={AccountId} key={CacheKey}",
+        input.AccountId,
+        cacheKey
+        );
+
 
         var txQ = await _tx.GetQueryableAsync();
         var q = txQ.Where(t => t.AccountId == input.AccountId);
@@ -537,7 +566,7 @@ public partial class BankingAppService
                 IdempotencyKey = key,
                 ProcessedAtUtc = Clock.Now
             };
-            
+
             await InvalidateAccountReadModelsAsync(userId, input.FromAccountId);
             await InvalidateAccountReadModelsAsync(userId, input.ToAccountId);
             await _idem.CompleteAsync(record, result, 200);
