@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Threading.Tasks;
 using BankApiAbp.Banking.Dtos;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Logging;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Caching;
 
@@ -22,13 +23,13 @@ public partial class BankingAppService
     private static DistributedCacheEntryOptions SummaryTtl =>
         new()
         {
-            AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(30)
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(5)
         };
 
     private static DistributedCacheEntryOptions StatementTtl =>
         new()
         {
-            AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(15)
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(5)
         };
 
     private string SummaryKey(Guid userId, Guid accountId, int version)
@@ -68,5 +69,11 @@ public partial class BankingAppService
     protected async Task InvalidateAccountReadModelsAsync(Guid userId, Guid accountId)
     {
         await BumpReadModelVersionAsync(userId, accountId);
+
+        Logger.LogInformation(
+       "CACHE INVALIDATE -> accountId={AccountId} userId={UserId}",
+       accountId,
+       userId
+   );
     }
 }
