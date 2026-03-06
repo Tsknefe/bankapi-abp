@@ -6,6 +6,20 @@ using Microsoft.Extensions.Hosting;
 using Serilog;
 using Serilog.Events;
 
+// RateLimit
+using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
+
+// OpenTelemetry
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+using OpenTelemetry.Metrics;
+
+// Elastic
+using Serilog.Sinks.Elasticsearch;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
+
 namespace BankApiAbp;
 
 public class Program
@@ -28,22 +42,122 @@ public class Program
         try
         {
             Log.Information("Starting BankApiAbp.HttpApi.Host.");
+
             var builder = WebApplication.CreateBuilder(args);
+
+            // ---- Serilog'u config ile tekrar zenginleştirelim (Elastic dahil) ----
+            var elasticUri = builder.Configuration["Elastic:Uri"];
+            var elasticIndexFormat = builder.Configuration["Elastic:IndexFormat"] ?? "bankapiabp-logs-{0:yyyy.MM.dd}";
+
             builder.Host.AddAppSettingsSecretsJson()
                 .UseAutofac()
-                .UseSerilog();
+                .UseSerilog((ctx, services, lc) =>
+                {
+                    lc.ReadFrom.Configuration(ctx.Configuration)
+                      .ReadFrom.Services(services)
+                      .Enrich.FromLogContext()
+                      .WriteTo.Async(c => c.File("Logs/logs.txt"))
+                      .WriteTo.Async(c => c.Console());
+
+                    if (!string.IsNullOrWhiteSpace(elasticUri))
+                    {
+                        lc.WriteTo.Async(c => c.Elasticsearch(new ElasticsearchSinkOptions(new Uri(elasticUri))
+                        {
+                            IndexFormat = elasticIndexFormat,
+                            AutoRegisterTemplate = true,
+                            MinimumLogEventLevel = LogEventLevel.Information
+                        }));
+                    }
+                });
+
+            // ---- Rate Limiting ----
+            var globalPermit = builder.Configuration.GetValue("RateLimiting:Global:PermitLimit", 120);
+            var globalWindowSeconds = builder.Configuration.GetValue("RateLimiting:Global:WindowSeconds", 60);
+
+            var transferTokenLimit = builder.Configuration.GetValue("RateLimiting:TransferPolicy:TokenLimit", 10);
+            var transferTokensPerPeriod = builder.Configuration.GetValue("RateLimiting:TransferPolicy:TokensPerPeriod", 10);
+            var transferPeriodSeconds = builder.Configuration.GetValue("RateLimiting:TransferPolicy:PeriodSeconds", 60);
+
+            builder.Services.AddRateLimiter(options =>
+            {
+                options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
+                {
+                    var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                    return RateLimitPartition.GetFixedWindowLimiter(ip, _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = globalPermit,
+                        Window = TimeSpan.FromSeconds(globalWindowSeconds),
+                        QueueLimit = 0
+                    });
+                });
+
+                options.AddPolicy("transfer", httpContext =>
+                {
+                    string? userId =
+                        httpContext.User?.FindFirst("sub")?.Value
+                        ?? httpContext.User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+                    var key = !string.IsNullOrWhiteSpace(userId)
+                        ? $"user:{userId}"
+                        : $"ip:{httpContext.Connection.RemoteIpAddress?.ToString() ?? "anon"}";
+
+                    return RateLimitPartition.GetTokenBucketLimiter(key, _ => new TokenBucketRateLimiterOptions
+                    {
+                        TokenLimit = transferTokenLimit,
+                        TokensPerPeriod = transferTokensPerPeriod,
+                        ReplenishmentPeriod = TimeSpan.FromSeconds(transferPeriodSeconds),
+                        QueueLimit = 0,
+                        AutoReplenishment = true
+                    });
+                });
+                options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            });
+
+            var otelServiceName = builder.Configuration["OpenTelemetry:ServiceName"] ?? "BankApiAbp.HttpApi.Host";
+            var otlpEndpoint = builder.Configuration["OpenTelemetry:OtlpEndpoint"];
+
+            builder.Services.AddOpenTelemetry()
+                .ConfigureResource(r => r.AddService(otelServiceName))
+                .WithTracing(t =>
+                {
+                    t.AddAspNetCoreInstrumentation()
+                     .AddHttpClientInstrumentation()
+                     .AddEntityFrameworkCoreInstrumentation();
+
+                    if (!string.IsNullOrWhiteSpace(otlpEndpoint))
+                    {
+                        t.AddOtlpExporter(o => o.Endpoint = new Uri(otlpEndpoint));
+                    }
+                })
+                .WithMetrics(m =>
+                {
+                    m.AddAspNetCoreInstrumentation()
+                     .AddRuntimeInstrumentation()
+                     .AddProcessInstrumentation()
+                     .AddMeter("BankApiAbp.Banking");
+
+
+                    if (!string.IsNullOrWhiteSpace(otlpEndpoint))
+                    {
+                        m.AddOtlpExporter(o => o.Endpoint = new Uri(otlpEndpoint));
+                    }
+                });
+
             await builder.AddApplicationAsync<BankApiAbpHttpApiHostModule>();
             var app = builder.Build();
+
             await app.InitializeApplicationAsync();
+
+            // ABP pipeline kurulduktan sonra
+            app.UseRateLimiter();
+
             await app.RunAsync();
             return 0;
         }
         catch (Exception ex)
         {
             if (ex is HostAbortedException)
-            {
                 throw;
-            }
 
             Log.Fatal(ex, "Host terminated unexpectedly!");
             return 1;

@@ -38,7 +38,7 @@ public class OpenIddictDataSeedContributor : IDataSeedContributor, ITransientDep
         IOpenIddictScopeRepository openIddictScopeRepository,
         IOpenIddictScopeManager scopeManager,
         IPermissionDataSeeder permissionDataSeeder,
-        IStringLocalizer<OpenIddictResponse> l )
+        IStringLocalizer<OpenIddictResponse> l)
     {
         _configuration = configuration;
         _openIddictApplicationRepository = openIddictApplicationRepository;
@@ -60,8 +60,11 @@ public class OpenIddictDataSeedContributor : IDataSeedContributor, ITransientDep
     {
         if (await _openIddictScopeRepository.FindByNameAsync("BankApiAbp") == null)
         {
-            await _scopeManager.CreateAsync(new OpenIddictScopeDescriptor {
-                Name = "BankApiAbp", DisplayName = "BankApiAbp API", Resources = { "BankApiAbp" }
+            await _scopeManager.CreateAsync(new OpenIddictScopeDescriptor
+            {
+                Name = "BankApiAbp",
+                DisplayName = "BankApiAbp API",
+                Resources = { "BankApiAbp" }
             });
         }
     }
@@ -131,7 +134,8 @@ public class OpenIddictDataSeedContributor : IDataSeedContributor, ITransientDep
 
         var client = await _openIddictApplicationRepository.FindByClientIdAsync(name);
 
-        var application = new AbpApplicationDescriptor {
+        var application = new AbpApplicationDescriptor
+        {
             ClientId = name,
             ClientType = type,
             ClientSecret = secret,
