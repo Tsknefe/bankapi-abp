@@ -40,32 +40,35 @@ public class ScenarioRunner
         await TestRateLimit(accountA, accountB);
     }
 
-    private async Task<string> LoginAsync(string username, string password)
+private async Task<string> LoginAsync(string username, string password)
+{
+    var form = new Dictionary<string, string>
     {
-        var form = new Dictionary<string, string>
-        {
-            ["grant_type"] = "password",
-            ["client_id"] = "BankApiAbp_Swagger",
-            ["scope"] = "BankApiAbp",
-            ["username"] = username,
-            ["password"] = password
-        };
+        ["grant_type"] = "password",
+        ["client_id"] = "BankApiAbp_Swagger",
+        ["scope"] = "BankApiAbp",
+        ["username"] = username,
+        ["password"] = password
+    };
 
-        using var req = new HttpRequestMessage(HttpMethod.Post, "/connect/token")
-        {
-            Content = new FormUrlEncodedContent(form)
-        };
+    using var req = new HttpRequestMessage(HttpMethod.Post, "/connect/token")
+    {
+        Content = new FormUrlEncodedContent(form)
+    };
 
-        var res = await _http.SendAsync(req);
-        var body = await res.Content.ReadAsStringAsync();
+    var res = await _http.SendAsync(req);
+    var body = await res.Content.ReadAsStringAsync();
 
-        res.EnsureSuccessStatusCode();
+    Console.WriteLine("LOGIN STATUS: " + (int)res.StatusCode);
+    Console.WriteLine("LOGIN RESPONSE:");
+    Console.WriteLine(body);
 
-        using var doc = JsonDocument.Parse(body);
-        return doc.RootElement.GetProperty("access_token").GetString()
-               ?? throw new Exception("access_token alınamadı");
-    }
+    res.EnsureSuccessStatusCode();
 
+    using var doc = JsonDocument.Parse(body);
+    return doc.RootElement.GetProperty("access_token").GetString()
+           ?? throw new Exception("access_token alınamadı");
+}
     private async Task TestSummaryCache(Guid accountId)
     {
         Console.WriteLine("\n=== SUMMARY CACHE TEST ===");

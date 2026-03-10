@@ -148,8 +148,6 @@ public class Program
 
             await app.InitializeApplicationAsync();
 
-            // ABP pipeline kurulduktan sonra
-            app.UseRateLimiter();
 
             await app.RunAsync();
             return 0;
