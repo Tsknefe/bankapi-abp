@@ -257,6 +257,7 @@ public class BankApiAbpHttpApiHostModule : AbpModule
         app.UseCorrelationId();
         app.MapAbpStaticAssets();
         app.UseRouting();
+        app.UseRateLimiter();
         app.UseCors();
         app.UseAuthentication();
         app.UseAbpOpenIddictValidation();

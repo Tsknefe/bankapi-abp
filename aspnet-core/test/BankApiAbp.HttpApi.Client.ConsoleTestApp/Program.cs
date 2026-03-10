@@ -1,11 +1,10 @@
 ﻿using BankApiAbp.HttpApi.Client.ConsoleTestApp;
 using System.Net.Http;
-using System;
 
 var baseUrl = "https://localhost:44389";
 
-var accountA = Guid.Parse("BURAYA_A_HESAP_GUID");
-var accountB = Guid.Parse("BURAYA_B_HESAP_GUID");
+var accountA = Guid.Parse("3a1f9cad-8add-0dd1-3772-511a6d1f7204");
+var accountB = Guid.Parse("3a1fb18d-4621-d1a4-d3e5-a2062ace7fa9");
 
 var handler = new HttpClientHandler
 {
@@ -21,8 +20,8 @@ using var httpClient = new HttpClient(handler)
 var runner = new ScenarioRunner(httpClient);
 
 await runner.RunAsync(
-    username: "admin",
-    password: "123qwe",
+    username: "efe",
+    password: "Qwe123!",
     accountA: accountA,
     accountB: accountB
 );
