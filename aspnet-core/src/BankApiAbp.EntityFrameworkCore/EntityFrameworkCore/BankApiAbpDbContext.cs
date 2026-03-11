@@ -16,6 +16,7 @@ using Volo.Abp.SettingManagement.EntityFrameworkCore;
 using Volo.Abp.TenantManagement;
 using Volo.Abp.TenantManagement.EntityFrameworkCore;
 using BankApiAbp.Banking;
+using Volo.Abp.EntityFrameworkCore.Modeling;
 
 namespace BankApiAbp.EntityFrameworkCore;
 
@@ -60,6 +61,7 @@ public class BankApiAbpDbContext :
     public DbSet<Tenant> Tenants { get; set; }
     public DbSet<TenantConnectionString> TenantConnectionStrings { get; set; }
     public DbSet<BankingIdempotencyRecord> BankingIdempotencyRecords { get; set; }
+    public DbSet<LedgerEntry> LedgerEntries { get; set; }
 
     #endregion
 
@@ -94,5 +96,22 @@ public class BankApiAbpDbContext :
         //    b.ConfigureByConvention(); //auto configure for the base class props
         //    //...
         //});
+
+        builder.Entity<LedgerEntry>(b =>
+        {
+            b.ToTable("AppLedgerEntries");
+
+            b.ConfigureByConvention();
+
+            b.Property(x => x.Description)
+                .IsRequired()
+                .HasMaxLength(256);
+
+            b.Property(x => x.Amount)
+                .HasColumnType("numeric(18,2)");
+
+            b.Property(x => x.BalanceAfter)
+                .HasColumnType("numeric(18,2)");
+        });
     }
 }
