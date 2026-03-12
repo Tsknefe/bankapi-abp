@@ -19,7 +19,7 @@ public class RateLimitTests
     [Fact]
     public async Task Should_Return_429_When_Rate_Limit_Is_Exceeded()
     {
-        using var client = TestClientFactory.Create();
+        using var client = TestClientFactory.CreateClient();
 
         var token = await GetToken(client);
         client.DefaultRequestHeaders.Authorization =

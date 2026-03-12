@@ -18,7 +18,7 @@ public class IdempotencyTests
     [Fact]
     public async Task Same_Idempotency_Key_Should_Not_Execute_Twice()
     {
-        using var client = TestClientFactory.Create();
+        using var client = TestClientFactory.CreateClient();
 
         var token = await GetToken(client);
         client.DefaultRequestHeaders.Authorization =

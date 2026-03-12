@@ -115,6 +115,18 @@ public partial class BankingAppService
                     null
                 ), autoSave: true);
 
+                var ledgerEntry = new LedgerEntry(
+                    GuidGenerator.Create(),
+                    txId,
+                    account.Id,
+                    LedgerDirection.Credit,
+                    input.Amount,
+                    account.Balance,
+                    input.Description ?? "Deposit"
+                );
+
+                await _ledgerEntryRepository.InsertAsync(ledgerEntry, autoSave: true);
+
                 newBalance = account.Balance;
             });
 
@@ -126,6 +138,7 @@ public partial class BankingAppService
                 IdempotencyKey = key,
                 ProcessedAtUtc = Clock.Now
             };
+
             await InvalidateAccountReadModelsAsync(userId, input.AccountId);
             await _idem.CompleteAsync(record, result, 200);
             return result;
@@ -136,6 +149,7 @@ public partial class BankingAppService
             throw;
         }
     }
+
     [Authorize(BankingPermissions.Accounts.Withdraw)]
     public async Task<WithdrawResultDto> WithdrawAsync(WithdrawDto input)
     {
@@ -201,6 +215,18 @@ public partial class BankingAppService
                     null
                 ), autoSave: true);
 
+                var ledgerEntry = new LedgerEntry(
+                    GuidGenerator.Create(),
+                    txId,
+                    account.Id,
+                    LedgerDirection.Debit,
+                    input.Amount,
+                    account.Balance,
+                    input.Description ?? "Withdraw"
+                );
+
+                await _ledgerEntryRepository.InsertAsync(ledgerEntry, autoSave: true);
+
                 newBalance = account.Balance;
             });
 
@@ -212,6 +238,7 @@ public partial class BankingAppService
                 IdempotencyKey = key,
                 ProcessedAtUtc = Clock.Now
             };
+
             await InvalidateAccountReadModelsAsync(userId, input.AccountId);
             await _idem.CompleteAsync(record, result, 200);
             return result;
@@ -549,6 +576,29 @@ public partial class BankingAppService
                     null,
                     null
                 ), autoSave: true);
+
+                var debitEntry = new LedgerEntry(
+                    GuidGenerator.Create(),
+                    txOutId,
+                    fromAcc.Id,
+                    LedgerDirection.Debit,
+                    input.Amount,
+                    fromAcc.Balance,
+                    input.Description ?? $"Transfer to {toAcc.Iban}"
+                );
+
+                var creditEntry = new LedgerEntry(
+                    GuidGenerator.Create(),
+                    txInId,
+                    toAcc.Id,
+                    LedgerDirection.Credit,
+                    input.Amount,
+                    toAcc.Balance,
+                    input.Description ?? $"Transfer from {fromAcc.Iban}"
+                );
+
+                await _ledgerEntryRepository.InsertAsync(debitEntry, autoSave: true);
+                await _ledgerEntryRepository.InsertAsync(creditEntry, autoSave: true);
 
                 fromNew = fromAcc.Balance;
                 toNew = toAcc.Balance;

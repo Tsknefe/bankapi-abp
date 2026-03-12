@@ -16,21 +16,21 @@ public class LedgerEntry : FullAuditedAggregateRoot<Guid>
 
     public decimal BalanceAfter { get; private set; }
 
-    public string Description { get; private set; } = default!;
+    public string? Description { get; private set; } = default!;
 
     private LedgerEntry()
     {
     }
 
     public LedgerEntry(
-        Guid id,
-        Guid transactionId,
-        Guid accountId,
-        LedgerDirection direction,
-        decimal amount,
-        decimal balanceAfter,
-        string description)
-        : base(id)
+    Guid id,
+    Guid transactionId,
+    Guid accountId,
+    LedgerDirection direction,
+    decimal amount,
+    decimal balanceAfter,
+    string? description)
+    : base(id)
     {
         TransactionId = transactionId;
         AccountId = accountId;
