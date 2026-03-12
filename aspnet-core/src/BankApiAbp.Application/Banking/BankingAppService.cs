@@ -23,6 +23,7 @@ public partial class BankingAppService : ApplicationService, IBankingAppService
     private readonly IdempotencyGate _idem;
     private readonly IHttpContextAccessor _http;
     private readonly IAbpDistributedLock _distributedLock;
+    private readonly IRepository<LedgerEntry, Guid> _ledgerEntryRepository;
 
     public BankingAppService(
         IRepository<Customer, Guid> customers,
@@ -34,7 +35,8 @@ public partial class BankingAppService : ApplicationService, IBankingAppService
         RowLockHelper rowLock,
         IdempotencyGate idem,
         IHttpContextAccessor http,
-        IAbpDistributedLock distributedLock)
+        IAbpDistributedLock distributedLock,
+        IRepository<LedgerEntry, Guid> ledgerEntryRepository)
     {
         _customers = customers;
         _accounts = accounts;
@@ -48,5 +50,6 @@ public partial class BankingAppService : ApplicationService, IBankingAppService
         _http = http;
 
         _distributedLock = distributedLock;
+        _ledgerEntryRepository = ledgerEntryRepository;
     }
 }

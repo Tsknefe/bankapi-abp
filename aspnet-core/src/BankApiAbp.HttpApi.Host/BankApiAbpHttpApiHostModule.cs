@@ -66,8 +66,13 @@ public class BankApiAbpHttpApiHostModule : AbpModule
                 options.UseAspNetCore();
             });
         });
-    }
 
+        PreConfigure<OpenIddictServerBuilder>(builder =>
+        {
+            builder.AllowPasswordFlow();
+            builder.AcceptAnonymousClients();
+        });
+    }
     public override void ConfigureServices(ServiceConfigurationContext context)
     {
         var configuration = context.Services.GetConfiguration();

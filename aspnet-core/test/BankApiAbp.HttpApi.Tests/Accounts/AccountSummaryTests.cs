@@ -13,7 +13,7 @@ public class AccountSummaryTests
     [Fact]
     public async Task Summary_Should_Return_200()
     {
-        using var client = TestClientFactory.Create();
+        using var client = TestClientFactory.CreateClient();
 
         var token = await GetToken(client);
 

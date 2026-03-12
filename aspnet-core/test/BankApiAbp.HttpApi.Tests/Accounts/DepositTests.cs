@@ -15,7 +15,7 @@ public class DepositTests
     [Fact]
     public async Task Deposit_Should_Increase_Balance()
     {
-        using var client = TestClientFactory.Create();
+        using var client = TestClientFactory.CreateClient();
 
         var token = await GetToken(client);
 

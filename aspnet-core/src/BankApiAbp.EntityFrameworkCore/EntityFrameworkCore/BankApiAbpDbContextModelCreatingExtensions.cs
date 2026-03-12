@@ -22,18 +22,6 @@ public static class BankApiAbpDbContextModelCreatingExtensions
     {
         Check.NotNull(builder, nameof(builder));
 
-        builder.Entity<Customer>(b =>
-        {
-            b.ToTable("Customers");
-            b.ConfigureByConvention();
-
-            b.Property(x => x.Name).IsRequired().HasMaxLength(100);
-            b.Property(x => x.TcNo).IsRequired().HasMaxLength(11);
-            b.Property(x => x.BirthPlace).IsRequired().HasMaxLength(50);
-
-            b.HasIndex(x => x.TcNo).IsUnique();
-        });
-
         builder.Entity<Account>(b =>
         {
             b.ToTable("Accounts");
@@ -42,7 +30,9 @@ public static class BankApiAbpDbContextModelCreatingExtensions
             b.Property(x => x.Name).IsRequired().HasMaxLength(100);
             b.Property(x => x.Iban).IsRequired().HasMaxLength(34);
             b.Property(x => x.Balance).HasColumnType("numeric(18,2)");
-            b.Property(x => x.RowVersion).IsRowVersion();
+            b.Property(x => x.RowVersion)
+                .IsRowVersion()
+                .IsRequired(false);
 
             b.HasIndex(x => x.Iban).IsUnique();
 
@@ -59,8 +49,9 @@ public static class BankApiAbpDbContextModelCreatingExtensions
 
             b.Property(x => x.CardNo).IsRequired().HasMaxLength(16);
             b.Property(x => x.CvvHash).IsRequired().HasMaxLength(500);
-            b.Property(x => x.RowVersion).IsRowVersion();
-
+            b.Property(x => x.RowVersion)
+                .IsRowVersion()
+                .IsRequired(false);
 
             b.HasIndex(x => x.CardNo).IsUnique();
 
@@ -82,7 +73,9 @@ public static class BankApiAbpDbContextModelCreatingExtensions
 
             b.Property(x => x.Limit).HasColumnType("numeric(18,2)");
             b.Property(x => x.CurrentDebt).HasColumnType("numeric(18,2)");
-            b.Property(x => x.RowVersion).IsRowVersion();
+            b.Property(x => x.RowVersion)
+                .IsRowVersion()
+                .IsRequired(false);
 
             b.HasIndex(x => x.CardNo).IsUnique();
 
@@ -91,7 +84,6 @@ public static class BankApiAbpDbContextModelCreatingExtensions
                 .HasForeignKey(x => x.CustomerId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
-
         builder.Entity<Transaction>(b =>
         {
             b.ToTable("Transactions");

@@ -1,20 +1,18 @@
-﻿using System.Net.Http;
+﻿using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace BankApiAbp.HttpApi.Tests.Infrastructure;
 
 public static class TestClientFactory
 {
-    public static HttpClient Create()
-    {
-        var handler = new HttpClientHandler
-        {
-            ServerCertificateCustomValidationCallback =
-                HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-        };
+    private static readonly WebApplicationFactory<BankApiAbp.Program> _factory =
+        new WebApplicationFactory<BankApiAbp.Program>();
 
-        return new HttpClient(handler)
+    public static HttpClient CreateClient()
+    {
+        return _factory.CreateClient(new WebApplicationFactoryClientOptions
         {
-            BaseAddress = new Uri("https://localhost:44389")
-        };
+            BaseAddress = new Uri("https://localhost"),
+            AllowAutoRedirect = false
+        });
     }
 }

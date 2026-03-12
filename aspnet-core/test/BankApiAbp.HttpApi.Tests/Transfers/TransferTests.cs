@@ -18,7 +18,7 @@ public class TransferTests
     [Fact]
     public async Task Transfer_Should_Move_Money_From_A_To_B()
     {
-        using var client = TestClientFactory.Create();
+        using var client = TestClientFactory.CreateClient();
 
         var token = await GetToken(client);
         client.DefaultRequestHeaders.Authorization =

@@ -104,7 +104,6 @@ public class BankApiAbpDbContext :
             b.ConfigureByConvention();
 
             b.Property(x => x.Description)
-                .IsRequired()
                 .HasMaxLength(256);
 
             b.Property(x => x.Amount)

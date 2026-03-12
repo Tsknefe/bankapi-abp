@@ -15,7 +15,7 @@ public class Account : FullAuditedAggregateRoot<Guid>
     public bool IsActive { get; private set; } = true;
 
     [Timestamp]
-    public byte[] RowVersion { get; private set; } = default!;
+    public byte[]? RowVersion { get; private set; } = default!;
 
     private Account() { }
 
