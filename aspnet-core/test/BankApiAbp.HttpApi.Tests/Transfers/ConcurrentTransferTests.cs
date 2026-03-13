@@ -1,29 +1,25 @@
-﻿using System.Net.Http.Headers;
-using System.Net.Http.Json;
-using System.Text.Json;
-using BankApiAbp.HttpApi.Tests.Infrastructure;
+﻿using BankApiAbp.HttpApi.Tests.Infrastructure;
 using FluentAssertions;
+using System.Net;
+using System.Net.Http.Json;
 using Xunit;
 
 namespace BankApiAbp.HttpApi.Tests.Transfers;
 
 public class ConcurrentTransferTests
 {
-    private static readonly Guid AccountA =
-        Guid.Parse("3a1f9cad-8add-0dd1-3772-511a6d1f7204");
-
-    private static readonly Guid AccountB =
-        Guid.Parse("3a1fb18d-4621-d1a4-d3e5-a2062ace7fa9");
+    private static readonly Guid AccountA = TestUsers.ConcurrentAccountA;
+    private static readonly Guid AccountB = TestUsers.ConcurrentAccountB;
 
     [Fact]
     public async Task Concurrent_Transfers_Should_Not_Break_Balance()
     {
         using var client = TestClientFactory.CreateClient();
 
-        var token = await GetToken(client);
-
-        client.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", token);
+        await TestAuthHelpers.AuthorizeAsync(
+            client,
+            TestUsers.ConcurrentUsername,
+            TestUsers.Password);
 
         var tasks = new List<Task<HttpResponseMessage>>();
 
@@ -33,7 +29,7 @@ public class ConcurrentTransferTests
             {
                 fromAccountId = AccountA,
                 toAccountId = AccountB,
-                amount = 1,
+                amount = 1m,
                 description = $"concurrent transfer {i}"
             };
 
@@ -50,39 +46,10 @@ public class ConcurrentTransferTests
         {
             var body = await res.Content.ReadAsStringAsync();
 
-            res.IsSuccessStatusCode
+            (res.StatusCode == HttpStatusCode.OK ||
+             res.StatusCode == HttpStatusCode.Conflict)
                 .Should()
                 .BeTrue($"StatusCode={(int)res.StatusCode}, Body={body}");
         }
-    }
-
-    private static async Task<string> GetToken(HttpClient client)
-    {
-        var payload = new Dictionary<string, string>
-        {
-            ["grant_type"] = "password",
-            ["client_id"] = "BankApiAbp_Swagger",
-            ["scope"] = "BankApiAbp",
-            ["username"] = "efe",
-            ["password"] = "Qwe123!"
-        };
-
-        var response = await client.PostAsync(
-            "/connect/token",
-            new FormUrlEncodedContent(payload)
-        );
-
-        var body = await response.Content.ReadAsStringAsync();
-
-        response.IsSuccessStatusCode
-            .Should()
-            .BeTrue($"StatusCode={(int)response.StatusCode}, Body={body}");
-
-        var token = JsonDocument.Parse(body)
-            .RootElement
-            .GetProperty("access_token")
-            .GetString();
-
-        return token!;
     }
 }

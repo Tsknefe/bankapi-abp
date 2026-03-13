@@ -25,7 +25,6 @@ public static class BankingPermissions
         public const string Summary = Default + ".Summary";
     }
 
-
     public static class DebitCards
     {
         public const string Default = GroupName + ".DebitCards";

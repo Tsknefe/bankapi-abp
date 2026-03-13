@@ -1,5 +1,4 @@
-﻿using System.Net.Http.Headers;
-using System.Net.Http.Json;
+﻿using System.Net.Http.Json;
 using System.Text.Json;
 using BankApiAbp.HttpApi.Tests.Infrastructure;
 using FluentAssertions;
@@ -9,31 +8,30 @@ namespace BankApiAbp.HttpApi.Tests.Accounts;
 
 public class DepositTests
 {
-    private static readonly Guid AccountA =
-        Guid.Parse("3a1f9cad-8add-0dd1-3772-511a6d1f7204");
+    private static readonly Guid AccountA = TestUsers.BasicAccountA;
 
     [Fact]
     public async Task Deposit_Should_Increase_Balance()
     {
         using var client = TestClientFactory.CreateClient();
 
-        var token = await GetToken(client);
+        await TestAuthHelpers.AuthorizeAsync(
+            client,
+            TestUsers.BasicUsername,
+            TestUsers.Password);
 
-        client.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", token);
+        var before = await GetBalance(client, AccountA);
 
-        var beforeBalance = await GetBalance(client, AccountA);
-
-        var depositPayload = new
+        var payload = new
         {
             accountId = AccountA,
-            amount = 5,
+            amount = 5m,
             description = "test deposit"
         };
 
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/app/banking/deposit");
         request.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
-        request.Content = JsonContent.Create(depositPayload);
+        request.Content = JsonContent.Create(payload);
 
         var response = await client.SendAsync(request);
         var body = await response.Content.ReadAsStringAsync();
@@ -42,9 +40,9 @@ public class DepositTests
             .Should()
             .BeTrue($"StatusCode={(int)response.StatusCode}, Body={body}");
 
-        var afterBalance = await GetBalance(client, AccountA);
+        var after = await GetBalance(client, AccountA);
 
-        afterBalance.Should().BeGreaterThan(beforeBalance);
+        after.Should().BeGreaterThan(before);
     }
 
     private static async Task<decimal> GetBalance(HttpClient client, Guid accountId)
@@ -65,25 +63,5 @@ public class DepositTests
             return currentBalanceProp.GetDecimal();
 
         throw new Exception("Summary response içinde balance/currentBalance alanı bulunamadı.");
-    }
-
-    private static async Task<string> GetToken(HttpClient client)
-    {
-        var payload = new Dictionary<string, string>
-        {
-            ["grant_type"] = "password",
-            ["client_id"] = "BankApiAbp_Swagger",
-            ["scope"] = "BankApiAbp",
-            ["username"] = "efe",
-            ["password"] = "Qwe123!"
-        };
-
-        var response = await client.PostAsync("/connect/token", new FormUrlEncodedContent(payload));
-        var body = await response.Content.ReadAsStringAsync();
-
-        response.IsSuccessStatusCode.Should().BeTrue($"StatusCode={(int)response.StatusCode}, Body={body}");
-
-        return JsonDocument.Parse(body).RootElement.GetProperty("access_token").GetString()
-               ?? throw new Exception("access_token bulunamadı");
     }
 }
