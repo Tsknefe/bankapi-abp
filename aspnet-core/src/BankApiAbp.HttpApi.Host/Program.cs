@@ -6,16 +6,13 @@ using Microsoft.Extensions.Hosting;
 using Serilog;
 using Serilog.Events;
 
-// RateLimit
 using Microsoft.AspNetCore.RateLimiting;
 using System.Threading.RateLimiting;
 
-// OpenTelemetry
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using OpenTelemetry.Metrics;
 
-// Elastic
 using Serilog.Sinks.Elasticsearch;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
@@ -45,7 +42,6 @@ public class Program
 
             var builder = WebApplication.CreateBuilder(args);
 
-            // ---- Serilog'u config ile tekrar zenginleştirelim (Elastic dahil) ----
             var elasticUri = builder.Configuration["Elastic:Uri"];
             var elasticIndexFormat = builder.Configuration["Elastic:IndexFormat"] ?? "bankapiabp-logs-{0:yyyy.MM.dd}";
 
@@ -70,7 +66,6 @@ public class Program
                     }
                 });
 
-            // ---- Rate Limiting ----
             var globalPermit = builder.Configuration.GetValue("RateLimiting:Global:PermitLimit", 120);
             var globalWindowSeconds = builder.Configuration.GetValue("RateLimiting:Global:WindowSeconds", 60);
 
@@ -80,15 +75,29 @@ public class Program
 
             builder.Services.AddRateLimiter(options =>
             {
+                if (builder.Environment.IsEnvironment("Test"))
+                {
+                    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(_ =>
+                        RateLimitPartition.GetNoLimiter("test-global"));
+
+                    options.AddPolicy("transfer", _ =>
+                        RateLimitPartition.GetNoLimiter("test-transfer"));
+
+                    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+                    return;
+                }
+
                 options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
                 {
                     var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-                    return RateLimitPartition.GetFixedWindowLimiter(ip, _ => new FixedWindowRateLimiterOptions
-                    {
-                        PermitLimit = globalPermit,
-                        Window = TimeSpan.FromSeconds(globalWindowSeconds),
-                        QueueLimit = 0
-                    });
+
+                    return RateLimitPartition.GetFixedWindowLimiter(ip, _ =>
+                        new FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = globalPermit,
+                            Window = TimeSpan.FromSeconds(globalWindowSeconds),
+                            QueueLimit = 0
+                        });
                 });
 
                 options.AddPolicy("transfer", httpContext =>
@@ -101,20 +110,27 @@ public class Program
                         ? $"user:{userId}"
                         : $"ip:{httpContext.Connection.RemoteIpAddress?.ToString() ?? "anon"}";
 
-                    return RateLimitPartition.GetTokenBucketLimiter(key, _ => new TokenBucketRateLimiterOptions
-                    {
-                        TokenLimit = transferTokenLimit,
-                        TokensPerPeriod = transferTokensPerPeriod,
-                        ReplenishmentPeriod = TimeSpan.FromSeconds(transferPeriodSeconds),
-                        QueueLimit = 0,
-                        AutoReplenishment = true
-                    });
+                    return RateLimitPartition.GetTokenBucketLimiter(key, _ =>
+                        new TokenBucketRateLimiterOptions
+                        {
+                            TokenLimit = transferTokenLimit,
+                            TokensPerPeriod = transferTokensPerPeriod,
+                            ReplenishmentPeriod = TimeSpan.FromSeconds(transferPeriodSeconds),
+                            QueueLimit = 0,
+                            AutoReplenishment = true
+                        });
                 });
+
                 options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
             });
-
             var otelServiceName = builder.Configuration["OpenTelemetry:ServiceName"] ?? "BankApiAbp.HttpApi.Host";
             var otlpEndpoint = builder.Configuration["OpenTelemetry:OtlpEndpoint"];
+
+            builder.Services.AddStackExchangeRedisCache(options =>
+            {
+                options.Configuration = builder.Configuration["Redis:Configuration"];
+                options.InstanceName = "BankApi:";
+            });
 
             builder.Services.AddOpenTelemetry()
                 .ConfigureResource(r => r.AddService(otelServiceName))
@@ -136,7 +152,6 @@ public class Program
                      .AddProcessInstrumentation()
                      .AddMeter("BankApiAbp.Banking");
 
-
                     if (!string.IsNullOrWhiteSpace(otlpEndpoint))
                     {
                         m.AddOtlpExporter(o => o.Endpoint = new Uri(otlpEndpoint));
@@ -147,7 +162,6 @@ public class Program
             var app = builder.Build();
 
             await app.InitializeApplicationAsync();
-
 
             await app.RunAsync();
             return 0;
