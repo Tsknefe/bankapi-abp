@@ -20,16 +20,48 @@ public partial class BankingAppService
     private IDistributedCache<string> VersionCache =>
         LazyServiceProvider.LazyGetRequiredService<IDistributedCache<string>>();
 
+    private IDistributedCache<AccountDto> AccountCache =>
+    LazyServiceProvider.LazyGetRequiredService<IDistributedCache<AccountDto>>();
+
+    private IDistributedCache<PagedResultDto<AccountListItemDto>> AccountsListCache =>
+        LazyServiceProvider.LazyGetRequiredService<IDistributedCache<PagedResultDto<AccountListItemDto>>>();
+
+    private IDistributedCache<string> AccountsListVersionCache =>
+        LazyServiceProvider.LazyGetRequiredService<IDistributedCache<string>>();
+
+    private static DistributedCacheEntryOptions AccountTtl =>
+    new()
+    {
+        AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(30)
+    };
+
+    private static DistributedCacheEntryOptions AccountsListTtl =>
+        new()
+        {
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(30)
+        };
+
+    private string AccountKey(Guid userId, Guid accountId, int version)
+        => $"acct:detail:u:{userId}:a:{accountId}:v:{version}";
+
+    private string AccountsListVersionKey(Guid userId)
+        => $"acct:listver:u:{userId}";
+
+    private string AccountsListKey(Guid userId, MyAccountsInput input, int version)
+        => $"acct:list:u:{userId}:v:{version}"
+           + $":c:{(input.CustomerId.HasValue ? input.CustomerId.Value.ToString() : "null")}"
+           + $":f:{(string.IsNullOrWhiteSpace(input.Filter) ? "null" : input.Filter.Trim())}"
+           + $":s:{input.SkipCount}:m:{input.MaxResultCount}";
     private static DistributedCacheEntryOptions SummaryTtl =>
         new()
         {
-            AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(5)
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(30)
         };
 
     private static DistributedCacheEntryOptions StatementTtl =>
         new()
         {
-            AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(5)
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(30)
         };
 
     private string SummaryKey(Guid userId, Guid accountId, int version)
@@ -66,14 +98,47 @@ public partial class BankingAppService
         );
     }
 
+    protected async Task<int> GetAccountsListVersionAsync(Guid userId)
+    {
+        var v = await AccountsListVersionCache.GetAsync(AccountsListVersionKey(userId));
+        if (string.IsNullOrWhiteSpace(v)) return 1;
+        return int.TryParse(v, out var parsed) ? parsed : 1;
+    }
+
+    private async Task BumpAccountsListVersionAsync(Guid userId)
+    {
+        var current = await GetAccountsListVersionAsync(userId);
+        var next = current + 1;
+
+        await AccountsListVersionCache.SetAsync(
+            AccountsListVersionKey(userId),
+            next.ToString(CultureInfo.InvariantCulture),
+            new DistributedCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(30)
+            }
+        );
+    }
+
+    protected async Task InvalidateAccountsListAsync(Guid userId)
+    {
+        await BumpAccountsListVersionAsync(userId);
+
+        Logger.LogInformation(
+            "CACHE INVALIDATE -> accounts-list userId={UserId}",
+            userId
+        );
+    }
     protected async Task InvalidateAccountReadModelsAsync(Guid userId, Guid accountId)
     {
         await BumpReadModelVersionAsync(userId, accountId);
+        await InvalidateAccountsListAsync(userId);
+
 
         Logger.LogInformation(
-       "CACHE INVALIDATE -> accountId={AccountId} userId={UserId}",
-       accountId,
-       userId
-   );
+           "CACHE INVALIDATE -> accountId={AccountId} userId={UserId}",
+           accountId,
+           userId
+       );
     }
 }

@@ -27,6 +27,7 @@ using Volo.Abp.AspNetCore.MultiTenancy;
 using Volo.Abp.AspNetCore.Serilog;
 using Volo.Abp.Autofac;
 using Volo.Abp.Caching;
+using Volo.Abp.Caching.StackExchangeRedis;
 using Volo.Abp.DistributedLocking;
 using Volo.Abp.Localization;
 using Volo.Abp.Modularity;
@@ -50,7 +51,8 @@ namespace BankApiAbp;
     typeof(AbpAccountWebOpenIddictModule),
     typeof(AbpAspNetCoreSerilogModule),
     typeof(AbpSwashbuckleModule),
-    typeof(AbpDistributedLockingModule)
+    typeof(AbpDistributedLockingModule),
+    typeof(AbpCachingStackExchangeRedisModule)
 )]
 public class BankApiAbpHttpApiHostModule : AbpModule
 {
