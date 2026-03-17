@@ -47,6 +47,8 @@ public partial class BankingAppService
         );
 
         await _accounts.InsertAsync(account, autoSave: true);
+        await InvalidateAccountsListAsync(userId);
+
         return new IdResponseDto { Id = account.Id };
     }
 
@@ -254,6 +256,27 @@ public partial class BankingAppService
     {
         var userId = CurrentUserIdOrThrow();
 
+        var ver = await GetAccountsListVersionAsync(userId);
+        var cacheKey = AccountsListKey(userId, input, ver);
+
+        var cached = await AccountsListCache.GetAsync(cacheKey);
+        if (cached != null)
+        {
+            Logger.LogInformation(
+                "CACHE HIT -> AccountsList userId={UserId} key={CacheKey}",
+                userId,
+                cacheKey
+            );
+
+            return cached;
+        }
+
+        Logger.LogInformation(
+            "CACHE MISS -> AccountsList userId={UserId} key={CacheKey}",
+            userId,
+            cacheKey
+        );
+
         var accountsQ = await _accounts.GetQueryableAsync();
         var customersQ = await _customers.GetQueryableAsync();
 
@@ -278,7 +301,7 @@ public partial class BankingAppService
 
         var items = await AsyncExecuter.ToListAsync(q.Skip(input.SkipCount).Take(input.MaxResultCount));
 
-        return new PagedResultDto<AccountListItemDto>(
+        var result = new PagedResultDto<AccountListItemDto>(
             total,
             items.Select(a => new AccountListItemDto
             {
@@ -291,8 +314,10 @@ public partial class BankingAppService
                 IsActive = a.IsActive
             }).ToList()
         );
-    }
 
+        await AccountsListCache.SetAsync(cacheKey, result, AccountsListTtl);
+        return result;
+    }
     [Authorize(BankingPermissions.Accounts.Summary)]
     public async Task<AccountSummaryDto> GetAccountSummaryAsync(Guid accountId)
     {
@@ -446,9 +471,32 @@ public partial class BankingAppService
     [Authorize(BankingPermissions.Accounts.Read)]
     public async Task<AccountDto> GetAccountAsync(Guid id)
     {
+        var userId = CurrentUserIdOrThrow();
+
+        var ver = await GetReadModelVersionAsync(userId, id);
+        var cacheKey = AccountKey(userId, id, ver);
+
+        var cached = await AccountCache.GetAsync(cacheKey);
+        if (cached != null)
+        {
+            Logger.LogInformation(
+                "CACHE HIT -> AccountDetail accountId={AccountId} key={CacheKey}",
+                id,
+                cacheKey
+            );
+
+            return cached;
+        }
+
+        Logger.LogInformation(
+            "CACHE MISS -> AccountDetail accountId={AccountId} key={CacheKey}",
+            id,
+            cacheKey
+        );
+
         var acc = await GetAccountOwnedAsync(id);
 
-        return new AccountDto
+        var result = new AccountDto
         {
             Id = acc.Id,
             CustomerId = acc.CustomerId,
@@ -458,8 +506,10 @@ public partial class BankingAppService
             AccountType = acc.AccountType,
             IsActive = acc.IsActive
         };
-    }
 
+        await AccountCache.SetAsync(cacheKey, result, AccountTtl);
+        return result;
+    }
     [EnableRateLimiting("transfer")]
     [Authorize(BankingPermissions.Accounts.Transfer)]
     public async Task<TransferResultDto> TransferAsync(TransferDto input)
