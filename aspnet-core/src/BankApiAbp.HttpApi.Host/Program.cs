@@ -1,21 +1,26 @@
 ﻿using System;
+using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
+
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Serilog;
-using Serilog.Events;
 
-using Microsoft.AspNetCore.RateLimiting;
-using System.Threading.RateLimiting;
-
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
-using OpenTelemetry.Metrics;
 
+using Serilog;
+using Serilog.Events;
 using Serilog.Sinks.Elasticsearch;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Configuration;
+
+using System.Threading.RateLimiting;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace BankApiAbp;
 
@@ -45,7 +50,8 @@ public class Program
             var elasticUri = builder.Configuration["Elastic:Uri"];
             var elasticIndexFormat = builder.Configuration["Elastic:IndexFormat"] ?? "bankapiabp-logs-{0:yyyy.MM.dd}";
 
-            builder.Host.AddAppSettingsSecretsJson()
+            builder.Host
+                .AddAppSettingsSecretsJson()
                 .UseAutofac()
                 .UseSerilog((ctx, services, lc) =>
                 {
@@ -123,14 +129,23 @@ public class Program
 
                 options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
             });
+
             var otelServiceName = builder.Configuration["OpenTelemetry:ServiceName"] ?? "BankApiAbp.HttpApi.Host";
             var otlpEndpoint = builder.Configuration["OpenTelemetry:OtlpEndpoint"];
+            var redisConfiguration = builder.Configuration["Redis:Configuration"];
 
             builder.Services.AddStackExchangeRedisCache(options =>
             {
-                options.Configuration = builder.Configuration["Redis:Configuration"];
+                options.Configuration = redisConfiguration;
                 options.InstanceName = "BankApi:";
             });
+
+            var healthChecks = builder.Services.AddHealthChecks();
+
+            if (!string.IsNullOrWhiteSpace(redisConfiguration))
+            {
+                healthChecks.AddRedis(redisConfiguration, name: "redis");
+            }
 
             builder.Services.AddOpenTelemetry()
                 .ConfigureResource(r => r.AddService(otelServiceName))
@@ -159,7 +174,85 @@ public class Program
                 });
 
             await builder.AddApplicationAsync<BankApiAbpHttpApiHostModule>();
+
             var app = builder.Build();
+
+            /*app.MapGet("/ping", () => Results.Ok(new { message = "pong" }));
+
+            app.MapHealthChecks("/health", new HealthCheckOptions
+            {
+                ResponseWriter = async (context, report) =>
+                {
+                    context.Response.ContentType = "application/json";
+
+                    var payload = new
+                    {
+                        status = report.Status.ToString(),
+                        entries = report.Entries.Select(x => new
+                        {
+                            name = x.Key,
+                            status = x.Value.Status.ToString(),
+                            exception = x.Value.Exception?.Message
+                        })
+                    };
+
+                    await context.Response.WriteAsync(JsonSerializer.Serialize(payload));
+                }
+            });*/
+            app.Use(async (context, next) =>
+            {
+                if (context.Request.Path.Equals("/ping", StringComparison.OrdinalIgnoreCase))
+                {
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync("""{"message":"pong"}""");
+                    return;
+                }
+
+                if (context.Request.Path.Equals("/health", StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        var healthCheckService = context.RequestServices.GetRequiredService<HealthCheckService>();
+                        var report = await healthCheckService.CheckHealthAsync();
+
+                        context.Response.ContentType = "application/json";
+
+                        var payload = new
+                        {
+                            status = report.Status.ToString(),
+                            totalDuration = report.TotalDuration.ToString(),
+                            entries = report.Entries.Select(x => new
+                            {
+                                name = x.Key,
+                                status = x.Value.Status.ToString(),
+                                description = x.Value.Description,
+                                duration = x.Value.Duration.ToString(),
+                                exception = x.Value.Exception?.Message
+                            })
+                        };
+
+                        await context.Response.WriteAsync(JsonSerializer.Serialize(payload));
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        context.Response.StatusCode = 500;
+                        context.Response.ContentType = "application/json";
+
+                        var errorPayload = new
+                        {
+                            status = "Error",
+                            message = ex.Message,
+                            detail = ex.ToString()
+                        };
+
+                        await context.Response.WriteAsync(JsonSerializer.Serialize(errorPayload));
+                        return;
+                    }
+                }
+
+                await next();
+            });
 
             await app.InitializeApplicationAsync();
 
