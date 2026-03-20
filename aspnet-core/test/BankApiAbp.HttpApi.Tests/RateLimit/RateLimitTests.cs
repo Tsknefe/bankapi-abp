@@ -41,6 +41,13 @@ public class RateLimitTests
             var response = await client.SendAsync(req);
             lastStatus = response.StatusCode;
 
+            Console.WriteLine($"[{i}] STATUS = {response.StatusCode}");
+
+            if (response.Headers.Location is not null)
+            {
+                Console.WriteLine($"[{i}] LOCATION = {response.Headers.Location}");
+            }
+
             if (response.StatusCode == HttpStatusCode.TooManyRequests)
                 break;
         }

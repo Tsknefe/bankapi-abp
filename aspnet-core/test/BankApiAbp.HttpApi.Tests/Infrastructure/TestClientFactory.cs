@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using System.Threading;
+using Volo.Abp.Uow;
 
 namespace BankApiAbp.HttpApi.Tests.Infrastructure;
 
@@ -24,13 +25,15 @@ public static class TestClientFactory
 
     public static HttpClient CreateClient()
     {
-        EnsureSeededAsync().GetAwaiter().GetResult();
-
-        return Factory.CreateClient(new WebApplicationFactoryClientOptions
+        var client = Factory.CreateClient(new WebApplicationFactoryClientOptions
         {
             BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false
         });
+
+        EnsureSeededAsync().GetAwaiter().GetResult();
+
+        return client;
     }
 
     private static async Task EnsureSeededAsync()
@@ -45,8 +48,15 @@ public static class TestClientFactory
                 return;
 
             using var scope = Factory.Services.CreateScope();
+
+            var uowManager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
             var seeder = scope.ServiceProvider.GetRequiredService<TestDataSeeder>();
-            await seeder.SeedAsync();
+
+            using (var uow = uowManager.Begin(requiresNew: true, isTransactional: false))
+            {
+                await seeder.SeedAsync();
+                await uow.CompleteAsync();
+            }
 
             _seeded = true;
         }
