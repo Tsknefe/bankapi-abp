@@ -7,6 +7,7 @@ using Volo.Abp.Domain.Repositories;
 using BankApiAbp.Banking.Infrastructure;
 using Microsoft.AspNetCore.Http;
 using Volo.Abp.DistributedLocking;
+using BankApiAbp.Banking.Caching;
 
 namespace BankApiAbp.Banking;
 
@@ -24,6 +25,7 @@ public partial class BankingAppService : ApplicationService, IBankingAppService
     private readonly IHttpContextAccessor _http;
     private readonly IAbpDistributedLock _distributedLock;
     private readonly IRepository<LedgerEntry, Guid> _ledgerEntryRepository;
+    private readonly IBankingCacheManager _bankingCacheManager;
 
     public BankingAppService(
         IRepository<Customer, Guid> customers,
@@ -36,7 +38,8 @@ public partial class BankingAppService : ApplicationService, IBankingAppService
         IdempotencyGate idem,
         IHttpContextAccessor http,
         IAbpDistributedLock distributedLock,
-        IRepository<LedgerEntry, Guid> ledgerEntryRepository)
+        IRepository<LedgerEntry, Guid> ledgerEntryRepository,
+        IBankingCacheManager bankingCacheManager)
     {
         _customers = customers;
         _accounts = accounts;
@@ -51,5 +54,6 @@ public partial class BankingAppService : ApplicationService, IBankingAppService
 
         _distributedLock = distributedLock;
         _ledgerEntryRepository = ledgerEntryRepository;
+        _bankingCacheManager = bankingCacheManager;
     }
 }

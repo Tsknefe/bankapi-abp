@@ -123,7 +123,7 @@ public partial class BankingAppService
                     account.Id,
                     LedgerDirection.Credit,
                     input.Amount,
-                    account.Balance,
+                    account.Balance,    
                     input.Description ?? "Deposit"
                 );
 
