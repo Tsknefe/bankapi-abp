@@ -8,7 +8,6 @@ using BankApiAbp.Permissions;
 using BankApiAbp.Transactions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.RateLimiting;
-using Microsoft.Extensions.Logging;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Authorization;
@@ -47,7 +46,7 @@ public partial class BankingAppService
         );
 
         await _accounts.InsertAsync(account, autoSave: true);
-        await InvalidateAccountsListAsync(userId);
+        await _bankingCacheManager.InvalidateAccountsListAsync(userId);
 
         return new IdResponseDto { Id = account.Id };
     }
@@ -58,6 +57,7 @@ public partial class BankingAppService
         using var activity = ActivitySource.StartActivity("Banking.Deposit");
         activity?.SetTag("account.id", input.AccountId.ToString());
         activity?.SetTag("amount", input.Amount);
+
         var userId = CurrentUserIdOrThrow();
         var operation = "accounts.deposit";
         var key = GetIdempotencyKeyOrThrow(operation);
@@ -81,7 +81,6 @@ public partial class BankingAppService
             }
 
             await _idem.GetOrThrowDuplicateResponseAsync(record);
-
             throw new BusinessException("IDEMPOTENCY_UNKNOWN_STATE");
         }
 
@@ -123,7 +122,7 @@ public partial class BankingAppService
                     account.Id,
                     LedgerDirection.Credit,
                     input.Amount,
-                    account.Balance,    
+                    account.Balance,
                     input.Description ?? "Deposit"
                 );
 
@@ -141,7 +140,7 @@ public partial class BankingAppService
                 ProcessedAtUtc = Clock.Now
             };
 
-            await InvalidateAccountReadModelsAsync(userId, input.AccountId);
+            await _bankingCacheManager.InvalidateAccountReadModelsAsync(userId, input.AccountId);
             await _idem.CompleteAsync(record, result, 200);
             return result;
         }
@@ -158,6 +157,7 @@ public partial class BankingAppService
         using var activity = ActivitySource.StartActivity("Banking.Withdraw");
         activity?.SetTag("account.id", input.AccountId.ToString());
         activity?.SetTag("amount", input.Amount);
+
         var userId = CurrentUserIdOrThrow();
         var operation = "accounts.withdraw";
         var key = GetIdempotencyKeyOrThrow(operation);
@@ -181,7 +181,6 @@ public partial class BankingAppService
             }
 
             await _idem.GetOrThrowDuplicateResponseAsync(record);
-
             throw new BusinessException("IDEMPOTENCY_UNKNOWN_STATE");
         }
 
@@ -241,7 +240,7 @@ public partial class BankingAppService
                 ProcessedAtUtc = Clock.Now
             };
 
-            await InvalidateAccountReadModelsAsync(userId, input.AccountId);
+            await _bankingCacheManager.InvalidateAccountReadModelsAsync(userId, input.AccountId);
             await _idem.CompleteAsync(record, result, 200);
             return result;
         }
@@ -251,31 +250,15 @@ public partial class BankingAppService
             throw;
         }
     }
+
     [Authorize(BankingPermissions.Accounts.List)]
     public async Task<PagedResultDto<AccountListItemDto>> GetMyAccountsAsync(MyAccountsInput input)
     {
         var userId = CurrentUserIdOrThrow();
 
-        var ver = await GetAccountsListVersionAsync(userId);
-        var cacheKey = AccountsListKey(userId, input, ver);
-
-        var cached = await AccountsListCache.GetAsync(cacheKey);
+        var cached = await _bankingCacheManager.GetAccountsListAsync(userId, input);
         if (cached != null)
-        {
-            Logger.LogInformation(
-                "CACHE HIT -> AccountsList userId={UserId} key={CacheKey}",
-                userId,
-                cacheKey
-            );
-
             return cached;
-        }
-
-        Logger.LogInformation(
-            "CACHE MISS -> AccountsList userId={UserId} key={CacheKey}",
-            userId,
-            cacheKey
-        );
 
         var accountsQ = await _accounts.GetQueryableAsync();
         var customersQ = await _customers.GetQueryableAsync();
@@ -299,7 +282,9 @@ public partial class BankingAppService
 
         q = q.OrderBy(x => x.Name);
 
-        var items = await AsyncExecuter.ToListAsync(q.Skip(input.SkipCount).Take(input.MaxResultCount));
+        var items = await AsyncExecuter.ToListAsync(
+            q.Skip(input.SkipCount).Take(input.MaxResultCount)
+        );
 
         var result = new PagedResultDto<AccountListItemDto>(
             total,
@@ -315,9 +300,10 @@ public partial class BankingAppService
             }).ToList()
         );
 
-        await AccountsListCache.SetAsync(cacheKey, result, AccountsListTtl);
+        await _bankingCacheManager.SetAccountsListAsync(userId, input, result);
         return result;
     }
+
     [Authorize(BankingPermissions.Accounts.Summary)]
     public async Task<AccountSummaryDto> GetAccountSummaryAsync(Guid accountId)
     {
@@ -325,31 +311,14 @@ public partial class BankingAppService
 
         var acc = await GetAccountOwnedAsync(accountId);
 
-        var ver = await GetReadModelVersionAsync(userId, accountId);
-        var cacheKey = SummaryKey(userId, accountId, ver);
-
-        var cached = await SummaryCache.GetAsync(cacheKey);
+        var cached = await _bankingCacheManager.GetSummaryAsync(userId, accountId);
         if (cached != null)
         {
             AccountSummaryCacheHitCounter.Add(1);
-
-            Logger.LogInformation(
-                "CACHE HIT -> AccountSummary accountId={AccountId} key={CacheKey}",
-                accountId,
-                cacheKey
-            );
-
             return cached;
         }
 
         AccountSummaryCacheMissCounter.Add(1);
-
-        Logger.LogInformation(
-                "CACHE MISS -> AccountSummary accountId={AccountId} key={CacheKey}",
-                accountId,
-                cacheKey
-            );
-
 
         var now = Clock.Now;
         var todayStart = now.Date;
@@ -387,19 +356,17 @@ public partial class BankingAppService
         {
             AccountId = acc.Id,
             Balance = acc.Balance,
-
             Today = todayStart,
             TodayTxCount = todayCount,
             TodayInTotal = todayIn,
             TodayOutTotal = todayOut,
-
             MonthStart = monthStart,
             MonthTxCount = monthCount,
             MonthInTotal = monthIn,
             MonthOutTotal = monthOut
         };
 
-        await SummaryCache.SetAsync(cacheKey, result, SummaryTtl);
+        await _bankingCacheManager.SetSummaryAsync(userId, accountId, result);
         return result;
     }
 
@@ -410,31 +377,14 @@ public partial class BankingAppService
 
         _ = await GetAccountOwnedAsync(input.AccountId);
 
-        var ver = await GetReadModelVersionAsync(userId, input.AccountId);
-        var cacheKey = StatementKey(userId, input, ver);
-
-        var cached = await StatementCache.GetAsync(cacheKey);
+        var cached = await _bankingCacheManager.GetStatementAsync(userId, input);
         if (cached != null)
         {
             AccountStatementCacheHitCounter.Add(1);
-
-            Logger.LogInformation(
-            "CACHE HIT -> AccountStatement accountId={AccountId} key={CacheKey}",
-            input.AccountId,
-            cacheKey
-            );
-
             return cached;
         }
 
         AccountStatementCacheMissCounter.Add(1);
-
-        Logger.LogInformation(
-        "CACHE MISS -> AccountStatement accountId={AccountId} key={CacheKey}",
-        input.AccountId,
-        cacheKey
-        );
-
 
         var txQ = await _tx.GetQueryableAsync();
         var q = txQ.Where(t => t.AccountId == input.AccountId);
@@ -448,7 +398,9 @@ public partial class BankingAppService
         q = q.OrderByDescending(t => t.CreationTime);
 
         var total = await AsyncExecuter.CountAsync(q);
-        var items = await AsyncExecuter.ToListAsync(q.Skip(input.SkipCount).Take(input.MaxResultCount));
+        var items = await AsyncExecuter.ToListAsync(
+            q.Skip(input.SkipCount).Take(input.MaxResultCount)
+        );
 
         var result = new PagedResultDto<TransactionDto>(
             total,
@@ -465,34 +417,18 @@ public partial class BankingAppService
             }).ToList()
         );
 
-        await StatementCache.SetAsync(cacheKey, result, StatementTtl);
+        await _bankingCacheManager.SetStatementAsync(userId, input, result);
         return result;
     }
+
     [Authorize(BankingPermissions.Accounts.Read)]
     public async Task<AccountDto> GetAccountAsync(Guid id)
     {
         var userId = CurrentUserIdOrThrow();
 
-        var ver = await GetReadModelVersionAsync(userId, id);
-        var cacheKey = AccountKey(userId, id, ver);
-
-        var cached = await AccountCache.GetAsync(cacheKey);
+        var cached = await _bankingCacheManager.GetAccountAsync(userId, id);
         if (cached != null)
-        {
-            Logger.LogInformation(
-                "CACHE HIT -> AccountDetail accountId={AccountId} key={CacheKey}",
-                id,
-                cacheKey
-            );
-
             return cached;
-        }
-
-        Logger.LogInformation(
-            "CACHE MISS -> AccountDetail accountId={AccountId} key={CacheKey}",
-            id,
-            cacheKey
-        );
 
         var acc = await GetAccountOwnedAsync(id);
 
@@ -507,9 +443,10 @@ public partial class BankingAppService
             IsActive = acc.IsActive
         };
 
-        await AccountCache.SetAsync(cacheKey, result, AccountTtl);
+        await _bankingCacheManager.SetAccountAsync(userId, id, result);
         return result;
     }
+
     [EnableRateLimiting("transfer")]
     [Authorize(BankingPermissions.Accounts.Transfer)]
     public async Task<TransferResultDto> TransferAsync(TransferDto input)
@@ -518,6 +455,7 @@ public partial class BankingAppService
         activity?.SetTag("from.account", input.FromAccountId.ToString());
         activity?.SetTag("to.account", input.ToAccountId.ToString());
         activity?.SetTag("amount", input.Amount);
+
         var userId = CurrentUserIdOrThrow();
         var operation = "accounts.transfer";
         var key = GetIdempotencyKeyOrThrow(operation);
@@ -587,8 +525,8 @@ public partial class BankingAppService
                 var firstAcc = await _rowLock.LockAccountForUpdateAsync(first, ct);
                 var secondAcc = await _rowLock.LockAccountForUpdateAsync(second, ct);
 
-                var fromAcc = (input.FromAccountId == first) ? firstAcc : secondAcc;
-                var toAcc = (input.ToAccountId == first) ? firstAcc : secondAcc;
+                var fromAcc = input.FromAccountId == first ? firstAcc : secondAcc;
+                var toAcc = input.ToAccountId == first ? firstAcc : secondAcc;
 
                 await EnsureAccountOwnedAsync(fromAcc.Id, ct);
                 await EnsureAccountOwnedAsync(toAcc.Id, ct);
@@ -667,8 +605,9 @@ public partial class BankingAppService
                 ProcessedAtUtc = Clock.Now
             };
 
-            await InvalidateAccountReadModelsAsync(userId, input.FromAccountId);
-            await InvalidateAccountReadModelsAsync(userId, input.ToAccountId);
+            await _bankingCacheManager.InvalidateAccountReadModelsAsync(userId, input.FromAccountId);
+            await _bankingCacheManager.InvalidateAccountReadModelsAsync(userId, input.ToAccountId);
+
             await _idem.CompleteAsync(record, result, 200);
             return result;
         }

@@ -6,6 +6,7 @@ using Volo.Abp.DependencyInjection;
 using Volo.Abp.Domain.Repositories;
 using Volo.Abp.Identity;
 using Volo.Abp.PermissionManagement;
+using Volo.Abp.Uow;
 
 namespace BankApiAbp.HttpApi.Tests.Infrastructure;
 
@@ -13,7 +14,6 @@ public class TestDataSeeder : ITransientDependency
 {
     private readonly IdentityUserManager _userManager;
     private readonly IdentityRoleManager _roleManager;
-    private readonly IIdentityRoleRepository _roleRepository;
     private readonly IRepository<IdentityUser, Guid> _users;
     private readonly IRepository<Customer, Guid> _customers;
     private readonly IRepository<Account, Guid> _accounts;
@@ -22,7 +22,6 @@ public class TestDataSeeder : ITransientDependency
     public TestDataSeeder(
         IdentityUserManager userManager,
         IdentityRoleManager roleManager,
-        IIdentityRoleRepository roleRepository,
         IRepository<IdentityUser, Guid> users,
         IRepository<Customer, Guid> customers,
         IRepository<Account, Guid> accounts,
@@ -30,13 +29,13 @@ public class TestDataSeeder : ITransientDependency
     {
         _userManager = userManager;
         _roleManager = roleManager;
-        _roleRepository = roleRepository;
         _users = users;
         _customers = customers;
         _accounts = accounts;
         _permissionDataSeeder = permissionDataSeeder;
     }
 
+    [UnitOfWork]
     public async Task SeedAsync()
     {
         var adminRole = await EnsureAdminRoleAsync();
@@ -126,8 +125,8 @@ public class TestDataSeeder : ITransientDependency
     private async Task<IdentityRole> EnsureAdminRoleAsync()
     {
         var adminRole =
-            await _roleRepository.FindByNormalizedNameAsync("ADMIN")
-            ?? await _roleRepository.FindByNormalizedNameAsync("ADMINISTRATOR");
+            await _roleManager.FindByNameAsync("admin")
+            ?? await _roleManager.FindByNameAsync("administrator");
 
         if (adminRole == null)
         {

@@ -7,14 +7,19 @@ namespace BankApiAbp.Banking.Caching;
 
 public interface IBankingCacheManager
 {
-    Task<int> GetAccountReadModelVersionAsync(Guid userId, Guid accountId);
-    Task<int> GetAccountsListVersionAsync(Guid userId);
+    Task<AccountDto?> GetAccountAsync(Guid userId, Guid accountId);
+    Task SetAccountAsync(Guid userId, Guid accountId, AccountDto dto);
 
-    string BuildAccountDetailKey(Guid userId, Guid accountId, int version);
-    string BuildAccountSummaryKey(Guid userId, Guid accountId, int version);
-    string BuildAccountStatementKey(Guid userId, GetAccountStatementInput input, int version);
-    string BuildAccountsListKey(Guid userId, MyAccountsInput input, int version);
+    Task<PagedResultDto<AccountListItemDto>?> GetAccountsListAsync(Guid userId, MyAccountsInput input);
+    Task SetAccountsListAsync(Guid userId, MyAccountsInput input, PagedResultDto<AccountListItemDto> dto);
 
+    Task<AccountSummaryDto?> GetSummaryAsync(Guid userId, Guid accountId);
+    Task SetSummaryAsync(Guid userId, Guid accountId, AccountSummaryDto dto);
+
+    Task<PagedResultDto<TransactionDto>?> GetStatementAsync(Guid userId, GetAccountStatementInput input);
+    Task SetStatementAsync(Guid userId, GetAccountStatementInput input, PagedResultDto<TransactionDto> dto);
+
+    Task<int> GetReadModelVersionAsync(Guid userId, Guid accountId);
     Task InvalidateAccountReadModelsAsync(Guid userId, Guid accountId);
     Task InvalidateAccountsListAsync(Guid userId);
 }
