@@ -11,7 +11,7 @@ public static class TestClientFactory
     private static readonly SemaphoreSlim SeedLock = new(1, 1);
     private static bool _seeded;
 
-    private static readonly WebApplicationFactory<BankApiAbp.Program> Factory =
+    private static readonly WebApplicationFactory<BankApiAbp.Program> TestFactory =
         new WebApplicationFactory<BankApiAbp.Program>()
             .WithWebHostBuilder(builder =>
             {
@@ -23,20 +23,41 @@ public static class TestClientFactory
                 });
             });
 
+    private static readonly WebApplicationFactory<BankApiAbp.Program> RateLimitFactory =
+        new WebApplicationFactory<BankApiAbp.Program>()
+            .WithWebHostBuilder(builder =>
+            {
+                builder.UseEnvironment("RateLimitTest");
+
+                builder.ConfigureServices(services =>
+                {
+                    services.AddTransient<TestDataSeeder>();
+                });
+            });
+
     public static HttpClient CreateClient()
     {
-        var client = Factory.CreateClient(new WebApplicationFactoryClientOptions
+        EnsureSeededAsync(TestFactory).GetAwaiter().GetResult();
+
+        return TestFactory.CreateClient(new WebApplicationFactoryClientOptions
         {
             BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false
         });
-
-        EnsureSeededAsync().GetAwaiter().GetResult();
-
-        return client;
     }
 
-    private static async Task EnsureSeededAsync()
+    public static HttpClient CreateRateLimitClient()
+    {
+        EnsureSeededAsync(RateLimitFactory).GetAwaiter().GetResult();
+
+        return RateLimitFactory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("https://localhost"),
+            AllowAutoRedirect = false
+        });
+    }
+
+    private static async Task EnsureSeededAsync(WebApplicationFactory<BankApiAbp.Program> factory)
     {
         if (_seeded)
             return;
@@ -47,7 +68,7 @@ public static class TestClientFactory
             if (_seeded)
                 return;
 
-            using var scope = Factory.Services.CreateScope();
+            using var scope = factory.Services.CreateScope();
 
             var uowManager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
             var seeder = scope.ServiceProvider.GetRequiredService<TestDataSeeder>();
