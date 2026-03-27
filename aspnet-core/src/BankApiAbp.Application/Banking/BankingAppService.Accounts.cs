@@ -3,6 +3,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using BankApiAbp.Banking.Dtos;
+using BankApiAbp.Banking.Events;
 using BankApiAbp.Entities;
 using BankApiAbp.Permissions;
 using BankApiAbp.Transactions;
@@ -11,6 +12,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Authorization;
+using Volo.Abp.EventBus.Distributed;
 
 namespace BankApiAbp.Banking;
 
@@ -608,6 +610,19 @@ public partial class BankingAppService
             await _bankingCacheManager.InvalidateAccountReadModelsAsync(userId, input.FromAccountId);
             await _bankingCacheManager.InvalidateAccountReadModelsAsync(userId, input.ToAccountId);
 
+            await _distributedEventBus.PublishAsync(
+                new TransferCompletedEto
+                {
+                    TransferId = txOutId,
+                    FromAccountId = input.FromAccountId,
+                    ToAccountId = input.ToAccountId,
+                    Amount = input.Amount,
+                    Description = input.Description,
+                    OccurredAtUtc = Clock.Now,
+                    IdempotencyKey = key,
+                    UserId = userId
+                }
+            );
             await _idem.CompleteAsync(record, result, 200);
             return result;
         }

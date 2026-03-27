@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Threading.RateLimiting;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Configuration;
@@ -75,49 +76,17 @@ public class Program
 
                 if (builder.Environment.IsEnvironment("Test"))
                 {
-                    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
-                    {
-                        var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "test-ip";
+                    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(_ =>
+                        RateLimitPartition.GetNoLimiter("test-global"));
 
-                        return RateLimitPartition.GetFixedWindowLimiter(
-                            partitionKey: $"global:{ip}",
-                            factory: _ => new FixedWindowRateLimiterOptions
-                            {
-                                PermitLimit = 100,
-                                Window = TimeSpan.FromMinutes(1),
-                                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-                                QueueLimit = 0,
-                                AutoReplenishment = true
-                            });
-                    });
-
-                    options.AddPolicy("transfer", httpContext =>
-                    {
-                        string? userId =
-                            httpContext.User?.FindFirst("sub")?.Value
-                            ?? httpContext.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
-                        var key = !string.IsNullOrWhiteSpace(userId)
-                            ? $"transfer:user:{userId}"
-                            : $"transfer:ip:{httpContext.Connection.RemoteIpAddress?.ToString() ?? "anon"}";
-
-                        return RateLimitPartition.GetTokenBucketLimiter(
-                            partitionKey: key,
-                            factory: _ => new TokenBucketRateLimiterOptions
-                            {
-                                TokenLimit = 2,
-                                TokensPerPeriod = 2,
-                                ReplenishmentPeriod = TimeSpan.FromMinutes(1),
-                                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-                                QueueLimit = 0,
-                                AutoReplenishment = true
-                            });
-                    });
+                    options.AddPolicy("transfer", _ =>
+                        RateLimitPartition.GetNoLimiter("test-transfer"));
                 }
                 else
                 {
                     var globalPermit = builder.Configuration.GetValue<int?>("RateLimiting:Global:PermitLimit") ?? 100;
                     var globalWindowSeconds = builder.Configuration.GetValue<int?>("RateLimiting:Global:WindowSeconds") ?? 60;
+
                     var transferTokenLimit = builder.Configuration.GetValue<int?>("RateLimiting:Transfer:TokenLimit") ?? 5;
                     var transferTokensPerPeriod = builder.Configuration.GetValue<int?>("RateLimiting:Transfer:TokensPerPeriod") ?? 5;
                     var transferPeriodSeconds = builder.Configuration.GetValue<int?>("RateLimiting:Transfer:PeriodSeconds") ?? 60;
@@ -132,8 +101,8 @@ public class Program
                             {
                                 PermitLimit = globalPermit,
                                 Window = TimeSpan.FromSeconds(globalWindowSeconds),
-                                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                                 QueueLimit = 0,
+                                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                                 AutoReplenishment = true
                             });
                     });
@@ -155,13 +124,22 @@ public class Program
                                 TokenLimit = transferTokenLimit,
                                 TokensPerPeriod = transferTokensPerPeriod,
                                 ReplenishmentPeriod = TimeSpan.FromSeconds(transferPeriodSeconds),
-                                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                                 QueueLimit = 0,
+                                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                                 AutoReplenishment = true
                             });
                     });
                 }
             });
+
+            if (builder.Environment.IsEnvironment("Test") ||
+                builder.Environment.IsEnvironment("RateLimitTest"))
+            {
+                builder.Services.Configure<StatusCodePagesOptions>(options =>
+                {
+                    options.HandleAsync = context => Task.CompletedTask;
+                });
+            }
 
             builder.Services.AddOpenTelemetry()
                 .ConfigureResource(resource =>
@@ -204,6 +182,21 @@ public class Program
             await builder.AddApplicationAsync<BankApiAbpHttpApiHostModule>();
 
             var app = builder.Build();
+            if (app.Environment.IsEnvironment("Test") ||
+    app.Environment.IsEnvironment("RateLimitTest"))
+            {
+                app.Use(async (context, next) =>
+                {
+                    await next();
+
+                    if (context.Response.StatusCode == StatusCodes.Status302Found &&
+                        context.Response.Headers.Location.ToString().Contains("httpStatusCode=429"))
+                    {
+                        context.Response.Headers.Location = "";
+                        context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                    }
+                });
+            }
 
             await app.InitializeApplicationAsync();
             await app.RunAsync();

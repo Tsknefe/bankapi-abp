@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Net.Http.Json;
+using System.Linq;
 using BankApiAbp.HttpApi.Tests.Infrastructure;
 using FluentAssertions;
 using Xunit;
@@ -15,7 +16,7 @@ public class RateLimitTests
     [Fact]
     public async Task Should_Return_429_When_Rate_Limit_Is_Exceeded()
     {
-        using var client = TestClientFactory.CreateClient();
+        using var client = TestClientFactory.CreateRateLimitClient();
 
         await TestAuthHelpers.AuthorizeAsync(
             client,
@@ -47,6 +48,11 @@ public class RateLimitTests
             {
                 Console.WriteLine($"[{i}] LOCATION = {response.Headers.Location}");
             }
+
+            var body = await response.Content.ReadAsStringAsync();
+            Console.WriteLine($"[{i}] BODY = {body}");
+
+            Console.WriteLine($"[{i}] WWW-Authenticate = {string.Join(" | ", response.Headers.WwwAuthenticate.Select(x => x.ToString()))}");
 
             if (response.StatusCode == HttpStatusCode.TooManyRequests)
                 break;
