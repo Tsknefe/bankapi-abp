@@ -7,9 +7,11 @@ using BankApiAbp.Entities;
 using BankApiAbp.Permissions;
 using BankApiAbp.Transactions;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
 using Volo.Abp;
 using Volo.Abp.Application.Dtos;
 using Volo.Abp.Authorization;
+using Volo.Abp.EventBus.Distributed;
 
 namespace BankApiAbp.Banking;
 
@@ -45,12 +47,18 @@ public partial class BankingAppService
         );
 
         await _accounts.InsertAsync(account, autoSave: true);
+        await _bankingCacheManager.InvalidateAccountsListAsync(userId);
+
         return new IdResponseDto { Id = account.Id };
     }
 
     [Authorize(BankingPermissions.Accounts.Deposit)]
     public async Task<DepositResultDto> DepositAsync(DepositDto input)
     {
+        using var activity = ActivitySource.StartActivity("Banking.Deposit");
+        activity?.SetTag("account.id", input.AccountId.ToString());
+        activity?.SetTag("amount", input.Amount);
+
         var userId = CurrentUserIdOrThrow();
         var operation = "accounts.deposit";
         var key = GetIdempotencyKeyOrThrow(operation);
@@ -74,7 +82,6 @@ public partial class BankingAppService
             }
 
             await _idem.GetOrThrowDuplicateResponseAsync(record);
-            
             throw new BusinessException("IDEMPOTENCY_UNKNOWN_STATE");
         }
 
@@ -110,6 +117,18 @@ public partial class BankingAppService
                     null
                 ), autoSave: true);
 
+                var ledgerEntry = new LedgerEntry(
+                    GuidGenerator.Create(),
+                    txId,
+                    account.Id,
+                    LedgerDirection.Credit,
+                    input.Amount,
+                    account.Balance,
+                    input.Description ?? "Deposit"
+                );
+
+                await _ledgerEntryRepository.InsertAsync(ledgerEntry, autoSave: true);
+
                 newBalance = account.Balance;
             });
 
@@ -122,6 +141,7 @@ public partial class BankingAppService
                 ProcessedAtUtc = Clock.Now
             };
 
+            await _bankingCacheManager.InvalidateAccountReadModelsAsync(userId, input.AccountId);
             await _idem.CompleteAsync(record, result, 200);
             return result;
         }
@@ -131,9 +151,14 @@ public partial class BankingAppService
             throw;
         }
     }
+
     [Authorize(BankingPermissions.Accounts.Withdraw)]
     public async Task<WithdrawResultDto> WithdrawAsync(WithdrawDto input)
     {
+        using var activity = ActivitySource.StartActivity("Banking.Withdraw");
+        activity?.SetTag("account.id", input.AccountId.ToString());
+        activity?.SetTag("amount", input.Amount);
+
         var userId = CurrentUserIdOrThrow();
         var operation = "accounts.withdraw";
         var key = GetIdempotencyKeyOrThrow(operation);
@@ -157,7 +182,6 @@ public partial class BankingAppService
             }
 
             await _idem.GetOrThrowDuplicateResponseAsync(record);
-
             throw new BusinessException("IDEMPOTENCY_UNKNOWN_STATE");
         }
 
@@ -193,6 +217,18 @@ public partial class BankingAppService
                     null
                 ), autoSave: true);
 
+                var ledgerEntry = new LedgerEntry(
+                    GuidGenerator.Create(),
+                    txId,
+                    account.Id,
+                    LedgerDirection.Debit,
+                    input.Amount,
+                    account.Balance,
+                    input.Description ?? "Withdraw"
+                );
+
+                await _ledgerEntryRepository.InsertAsync(ledgerEntry, autoSave: true);
+
                 newBalance = account.Balance;
             });
 
@@ -205,6 +241,7 @@ public partial class BankingAppService
                 ProcessedAtUtc = Clock.Now
             };
 
+            await _bankingCacheManager.InvalidateAccountReadModelsAsync(userId, input.AccountId);
             await _idem.CompleteAsync(record, result, 200);
             return result;
         }
@@ -214,10 +251,15 @@ public partial class BankingAppService
             throw;
         }
     }
+
     [Authorize(BankingPermissions.Accounts.List)]
     public async Task<PagedResultDto<AccountListItemDto>> GetMyAccountsAsync(MyAccountsInput input)
     {
         var userId = CurrentUserIdOrThrow();
+
+        var cached = await _bankingCacheManager.GetAccountsListAsync(userId, input);
+        if (cached != null)
+            return cached;
 
         var accountsQ = await _accounts.GetQueryableAsync();
         var customersQ = await _customers.GetQueryableAsync();
@@ -241,9 +283,11 @@ public partial class BankingAppService
 
         q = q.OrderBy(x => x.Name);
 
-        var items = await AsyncExecuter.ToListAsync(q.Skip(input.SkipCount).Take(input.MaxResultCount));
+        var items = await AsyncExecuter.ToListAsync(
+            q.Skip(input.SkipCount).Take(input.MaxResultCount)
+        );
 
-        return new PagedResultDto<AccountListItemDto>(
+        var result = new PagedResultDto<AccountListItemDto>(
             total,
             items.Select(a => new AccountListItemDto
             {
@@ -256,12 +300,26 @@ public partial class BankingAppService
                 IsActive = a.IsActive
             }).ToList()
         );
+
+        await _bankingCacheManager.SetAccountsListAsync(userId, input, result);
+        return result;
     }
 
     [Authorize(BankingPermissions.Accounts.Summary)]
     public async Task<AccountSummaryDto> GetAccountSummaryAsync(Guid accountId)
     {
+        var userId = CurrentUserIdOrThrow();
+
         var acc = await GetAccountOwnedAsync(accountId);
+
+        var cached = await _bankingCacheManager.GetSummaryAsync(userId, accountId);
+        if (cached != null)
+        {
+            AccountSummaryCacheHitCounter.Add(1);
+            return cached;
+        }
+
+        AccountSummaryCacheMissCounter.Add(1);
 
         var now = Clock.Now;
         var todayStart = now.Date;
@@ -271,7 +329,6 @@ public partial class BankingAppService
         var nextMonth = monthStart.AddMonths(1);
 
         var txQ = await _tx.GetQueryableAsync();
-
         var qAcc = txQ.Where(t => t.AccountId == acc.Id);
 
         var todayQ = qAcc.Where(t => t.CreationTime >= todayStart && t.CreationTime < tomorrow);
@@ -296,27 +353,39 @@ public partial class BankingAppService
             monthQ.Where(t => t.TxType == TransactionType.Withdraw),
             t => (decimal?)t.Amount) ?? 0m;
 
-        return new AccountSummaryDto
+        var result = new AccountSummaryDto
         {
             AccountId = acc.Id,
             Balance = acc.Balance,
-
             Today = todayStart,
             TodayTxCount = todayCount,
             TodayInTotal = todayIn,
             TodayOutTotal = todayOut,
-
             MonthStart = monthStart,
             MonthTxCount = monthCount,
             MonthInTotal = monthIn,
             MonthOutTotal = monthOut
         };
+
+        await _bankingCacheManager.SetSummaryAsync(userId, accountId, result);
+        return result;
     }
 
     [Authorize(BankingPermissions.Accounts.Statement)]
     public async Task<PagedResultDto<TransactionDto>> GetAccountStatementAsync(GetAccountStatementInput input)
     {
+        var userId = CurrentUserIdOrThrow();
+
         _ = await GetAccountOwnedAsync(input.AccountId);
+
+        var cached = await _bankingCacheManager.GetStatementAsync(userId, input);
+        if (cached != null)
+        {
+            AccountStatementCacheHitCounter.Add(1);
+            return cached;
+        }
+
+        AccountStatementCacheMissCounter.Add(1);
 
         var txQ = await _tx.GetQueryableAsync();
         var q = txQ.Where(t => t.AccountId == input.AccountId);
@@ -330,9 +399,11 @@ public partial class BankingAppService
         q = q.OrderByDescending(t => t.CreationTime);
 
         var total = await AsyncExecuter.CountAsync(q);
-        var items = await AsyncExecuter.ToListAsync(q.Skip(input.SkipCount).Take(input.MaxResultCount));
+        var items = await AsyncExecuter.ToListAsync(
+            q.Skip(input.SkipCount).Take(input.MaxResultCount)
+        );
 
-        return new PagedResultDto<TransactionDto>(
+        var result = new PagedResultDto<TransactionDto>(
             total,
             items.Select(t => new TransactionDto
             {
@@ -346,13 +417,23 @@ public partial class BankingAppService
                 CreditCardId = t.CreditCardId
             }).ToList()
         );
+
+        await _bankingCacheManager.SetStatementAsync(userId, input, result);
+        return result;
     }
+
     [Authorize(BankingPermissions.Accounts.Read)]
     public async Task<AccountDto> GetAccountAsync(Guid id)
     {
+        var userId = CurrentUserIdOrThrow();
+
+        var cached = await _bankingCacheManager.GetAccountAsync(userId, id);
+        if (cached != null)
+            return cached;
+
         var acc = await GetAccountOwnedAsync(id);
 
-        return new AccountDto
+        var result = new AccountDto
         {
             Id = acc.Id,
             CustomerId = acc.CustomerId,
@@ -362,10 +443,20 @@ public partial class BankingAppService
             AccountType = acc.AccountType,
             IsActive = acc.IsActive
         };
+
+        await _bankingCacheManager.SetAccountAsync(userId, id, result);
+        return result;
     }
+
+    [EnableRateLimiting("transfer")]
     [Authorize(BankingPermissions.Accounts.Transfer)]
     public async Task<TransferResultDto> TransferAsync(TransferDto input)
     {
+        using var activity = ActivitySource.StartActivity("Banking.Transfer");
+        activity?.SetTag("from.account", input.FromAccountId.ToString());
+        activity?.SetTag("to.account", input.ToAccountId.ToString());
+        activity?.SetTag("amount", input.Amount);
+
         var userId = CurrentUserIdOrThrow();
         var operation = "accounts.transfer";
         var key = GetIdempotencyKeyOrThrow(operation);
@@ -435,8 +526,8 @@ public partial class BankingAppService
                 var firstAcc = await _rowLock.LockAccountForUpdateAsync(first, ct);
                 var secondAcc = await _rowLock.LockAccountForUpdateAsync(second, ct);
 
-                var fromAcc = (input.FromAccountId == first) ? firstAcc : secondAcc;
-                var toAcc = (input.ToAccountId == first) ? firstAcc : secondAcc;
+                var fromAcc = input.FromAccountId == first ? firstAcc : secondAcc;
+                var toAcc = input.ToAccountId == first ? firstAcc : secondAcc;
 
                 await EnsureAccountOwnedAsync(fromAcc.Id, ct);
                 await EnsureAccountOwnedAsync(toAcc.Id, ct);
@@ -475,6 +566,29 @@ public partial class BankingAppService
                     null
                 ), autoSave: true);
 
+                var debitEntry = new LedgerEntry(
+                    GuidGenerator.Create(),
+                    txOutId,
+                    fromAcc.Id,
+                    LedgerDirection.Debit,
+                    input.Amount,
+                    fromAcc.Balance,
+                    input.Description ?? $"Transfer to {toAcc.Iban}"
+                );
+
+                var creditEntry = new LedgerEntry(
+                    GuidGenerator.Create(),
+                    txInId,
+                    toAcc.Id,
+                    LedgerDirection.Credit,
+                    input.Amount,
+                    toAcc.Balance,
+                    input.Description ?? $"Transfer from {fromAcc.Iban}"
+                );
+
+                await _ledgerEntryRepository.InsertAsync(debitEntry, autoSave: true);
+                await _ledgerEntryRepository.InsertAsync(creditEntry, autoSave: true);
+
                 fromNew = fromAcc.Balance;
                 toNew = toAcc.Balance;
             });
@@ -492,6 +606,24 @@ public partial class BankingAppService
                 ProcessedAtUtc = Clock.Now
             };
 
+            await _bankingCacheManager.InvalidateAccountReadModelsAsync(userId, input.FromAccountId);
+            await _bankingCacheManager.InvalidateAccountReadModelsAsync(userId, input.ToAccountId);
+
+            await _distributedEventBus.PublishAsync(
+                new MoneyTransferredEto
+                {
+                    EventId = Guid.NewGuid(),
+
+                    TransferId = txOutId,
+                    FromAccountId = input.FromAccountId,
+                    ToAccountId = input.ToAccountId,
+                    Amount = input.Amount,
+                    Description = input.Description,
+                    OccurredAtUtc = Clock.Now,
+                    IdempotencyKey = key,
+                    UserId = userId
+                }
+            );
             await _idem.CompleteAsync(record, result, 200);
             return result;
         }

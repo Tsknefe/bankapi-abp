@@ -1,4 +1,5 @@
 ﻿using BankApiAbp.Banking;
+using BankApiAbp.Banking.Messaging;
 using BankApiAbp.Cards;
 using BankApiAbp.Entities;
 using BankApiAbp.Transactions;
@@ -14,25 +15,11 @@ public static class BankApiAbpDbContextModelCreatingExtensions
     {
         Check.NotNull(builder, nameof(builder));
 
-        // İstersen burada "prefix/schema" gibi sabitleri de kullanırsın.
-        // Şimdilik boş kalsın; Banking ayrı extension'da.
     }
 
     public static void ConfigureBanking(this ModelBuilder builder)
     {
         Check.NotNull(builder, nameof(builder));
-
-        builder.Entity<Customer>(b =>
-        {
-            b.ToTable("Customers");
-            b.ConfigureByConvention();
-
-            b.Property(x => x.Name).IsRequired().HasMaxLength(100);
-            b.Property(x => x.TcNo).IsRequired().HasMaxLength(11);
-            b.Property(x => x.BirthPlace).IsRequired().HasMaxLength(50);
-
-            b.HasIndex(x => x.TcNo).IsUnique();
-        });
 
         builder.Entity<Account>(b =>
         {
@@ -42,7 +29,9 @@ public static class BankApiAbpDbContextModelCreatingExtensions
             b.Property(x => x.Name).IsRequired().HasMaxLength(100);
             b.Property(x => x.Iban).IsRequired().HasMaxLength(34);
             b.Property(x => x.Balance).HasColumnType("numeric(18,2)");
-            b.Property(x => x.RowVersion).IsRowVersion();
+            b.Property(x => x.RowVersion)
+                .IsRowVersion()
+                .IsRequired(false);
 
             b.HasIndex(x => x.Iban).IsUnique();
 
@@ -59,8 +48,9 @@ public static class BankApiAbpDbContextModelCreatingExtensions
 
             b.Property(x => x.CardNo).IsRequired().HasMaxLength(16);
             b.Property(x => x.CvvHash).IsRequired().HasMaxLength(500);
-            b.Property(x => x.RowVersion).IsRowVersion();
-
+            b.Property(x => x.RowVersion)
+                .IsRowVersion()
+                .IsRequired(false);
 
             b.HasIndex(x => x.CardNo).IsUnique();
 
@@ -82,7 +72,9 @@ public static class BankApiAbpDbContextModelCreatingExtensions
 
             b.Property(x => x.Limit).HasColumnType("numeric(18,2)");
             b.Property(x => x.CurrentDebt).HasColumnType("numeric(18,2)");
-            b.Property(x => x.RowVersion).IsRowVersion();
+            b.Property(x => x.RowVersion)
+                .IsRowVersion()
+                .IsRequired(false);
 
             b.HasIndex(x => x.CardNo).IsUnique();
 
@@ -91,7 +83,6 @@ public static class BankApiAbpDbContextModelCreatingExtensions
                 .HasForeignKey(x => x.CustomerId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
-
         builder.Entity<Transaction>(b =>
         {
             b.ToTable("Transactions");
@@ -120,6 +111,46 @@ public static class BankApiAbpDbContextModelCreatingExtensions
             b.Property(x => x.IdempotencyKey).IsRequired().HasMaxLength(128);
             b.Property(x => x.RequestHash).HasMaxLength(256);
             b.Property(x => x.Status).IsRequired().HasMaxLength(32);
-        }); 
+        });
+
+        builder.Entity<InboxMessage>(b =>
+        {
+            b.ToTable("BankingInboxMessages");
+
+            b.ConfigureByConvention();
+
+            b.Property(x => x.EventId)
+                .IsRequired();
+
+            b.Property(x => x.EventName)
+                .IsRequired()
+                .HasMaxLength(256);
+
+            b.Property(x => x.ConsumerName)
+                .IsRequired()
+                .HasMaxLength(256);
+
+            b.Property(x => x.Status)
+                .IsRequired()
+                .HasMaxLength(64);
+
+            b.Property(x => x.PayloadHash)
+                .HasMaxLength(128);
+
+            b.Property(x => x.Error)
+                .HasMaxLength(4000);
+
+            b.Property(x => x.RetryCount)
+                .IsRequired();
+
+            b.HasIndex(x => new { x.ConsumerName, x.EventId })
+                .IsUnique();
+
+            b.HasIndex(x => x.Status);
+
+            b.HasIndex(x => x.ProcessedAt);
+
+            b.HasIndex(x => x.LastAttemptTime);
+        });
     }
 }

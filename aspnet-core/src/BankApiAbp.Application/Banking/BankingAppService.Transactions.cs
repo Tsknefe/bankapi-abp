@@ -26,7 +26,7 @@ public partial class BankingAppService
             join a in accountsQ on t.AccountId equals a.Id into aJoin
             from a in aJoin.DefaultIfEmpty()
             join cA in customersQ on a.CustomerId equals cA.Id into cAJoin
-            from cA in cAJoin.DefaultIfEmpty()
+            from cA in cAJoin.DefaultIfEmpty() 
 
             join dc in debitCardsQ on t.DebitCardId equals dc.Id into dcJoin
             from dc in dcJoin.DefaultIfEmpty()

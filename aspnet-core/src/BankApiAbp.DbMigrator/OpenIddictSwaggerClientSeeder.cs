@@ -25,10 +25,6 @@ public class OpenIddictSwaggerClientSeeder : ITransientDependency
         var clientId = section["ClientId"] ?? "BankApiAbp_Swagger";
         var rootUrl = section["RootUrl"] ?? "https://localhost:44389";
 
-        var existing = await _appManager.FindByClientIdAsync(clientId);
-        if (existing != null)
-            return;
-
         var descriptor = new OpenIddictApplicationDescriptor
         {
             ClientId = clientId,
@@ -44,7 +40,11 @@ public class OpenIddictSwaggerClientSeeder : ITransientDependency
         {
             OpenIddictConstants.Permissions.Endpoints.Authorization,
             OpenIddictConstants.Permissions.Endpoints.Token,
+
             OpenIddictConstants.Permissions.GrantTypes.AuthorizationCode,
+            OpenIddictConstants.Permissions.GrantTypes.Password,
+            OpenIddictConstants.Permissions.GrantTypes.RefreshToken,
+
             OpenIddictConstants.Permissions.ResponseTypes.Code,
 
             OpenIddictConstants.Permissions.Prefixes.Scope + "openid",
@@ -57,6 +57,15 @@ public class OpenIddictSwaggerClientSeeder : ITransientDependency
 
         descriptor.Requirements.Add(OpenIddictConstants.Requirements.Features.ProofKeyForCodeExchange);
 
-        await _appManager.CreateAsync(descriptor);
+        var existing = await _appManager.FindByClientIdAsync(clientId);
+
+        if (existing == null)
+        {
+            await _appManager.CreateAsync(descriptor);
+        }
+        else
+        {
+            await _appManager.UpdateAsync(existing, descriptor);
+        }
     }
 }
