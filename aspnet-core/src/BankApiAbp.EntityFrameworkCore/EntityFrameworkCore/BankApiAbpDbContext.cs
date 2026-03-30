@@ -1,4 +1,5 @@
 ﻿using BankApiAbp.Banking;
+using BankApiAbp.Banking.Messaging;
 using BankApiAbp.Cards;
 using BankApiAbp.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -52,6 +53,8 @@ public class BankApiAbpDbContext :
 
     public DbSet<IncomingEventRecord> IncomingEvents { get; set; }
     public DbSet<OutgoingEventRecord> OutgoingEvents { get; set; }
+
+    public DbSet<InboxMessage> InboxMessages { get; set; }
 
     public BankApiAbpDbContext(DbContextOptions<BankApiAbpDbContext> options)
         : base(options)

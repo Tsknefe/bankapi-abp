@@ -3,7 +3,6 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using BankApiAbp.Banking.Dtos;
-using BankApiAbp.Banking.Events;
 using BankApiAbp.Entities;
 using BankApiAbp.Permissions;
 using BankApiAbp.Transactions;
@@ -611,8 +610,10 @@ public partial class BankingAppService
             await _bankingCacheManager.InvalidateAccountReadModelsAsync(userId, input.ToAccountId);
 
             await _distributedEventBus.PublishAsync(
-                new TransferCompletedEto
+                new MoneyTransferredEto
                 {
+                    EventId = Guid.NewGuid(),
+
                     TransferId = txOutId,
                     FromAccountId = input.FromAccountId,
                     ToAccountId = input.ToAccountId,
