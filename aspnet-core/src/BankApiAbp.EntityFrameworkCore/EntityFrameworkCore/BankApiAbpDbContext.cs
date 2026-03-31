@@ -56,6 +56,10 @@ public class BankApiAbpDbContext :
 
     public DbSet<InboxMessage> InboxMessages { get; set; }
 
+    public DbSet<TransferAuditLog> TransferAuditLogs { get; set; }
+
+    public DbSet<TransferNotificationLog> TransferNotificationLogs { get; set; }
+
     public BankApiAbpDbContext(DbContextOptions<BankApiAbpDbContext> options)
         : base(options)
     {
