@@ -152,5 +152,82 @@ public static class BankApiAbpDbContextModelCreatingExtensions
 
             b.HasIndex(x => x.LastAttemptTime);
         });
+        builder.Entity<TransferAuditLog>(b =>
+        {
+            b.ToTable("BankingTransferAuditLogs");
+
+            b.ConfigureByConvention();
+
+            b.Property(x => x.EventId).IsRequired();
+            b.Property(x => x.TransferId).IsRequired();
+            b.Property(x => x.FromAccountId).IsRequired();
+            b.Property(x => x.ToAccountId).IsRequired();
+            b.Property(x => x.UserId).IsRequired();
+
+            b.Property(x => x.Amount)
+                .HasColumnType("numeric(18,2)")
+                .IsRequired();
+
+            b.Property(x => x.Description)
+                .HasMaxLength(512);
+
+            b.Property(x => x.IdempotencyKey)
+                .HasMaxLength(128);
+
+            b.Property(x => x.EventName)
+                .HasMaxLength(256)
+                .IsRequired();
+
+            b.Property(x => x.OccurredAtUtc)
+                .IsRequired();
+
+            b.HasIndex(x => x.EventId).IsUnique();
+            b.HasIndex(x => x.TransferId);
+            b.HasIndex(x => x.UserId);
+            b.HasIndex(x => x.CreationTime);
+        });
+
+        builder.Entity<TransferNotificationLog>(b =>
+        {
+            b.ToTable("BankingTransferNotifications");
+
+            b.ConfigureByConvention();
+
+            b.Property(x => x.EventId).IsRequired();
+            b.Property(x => x.TransferId).IsRequired();
+            b.Property(x => x.UserId).IsRequired();
+            b.Property(x => x.FromAccountId).IsRequired();
+            b.Property(x => x.ToAccountId).IsRequired();
+
+            b.Property(x => x.Amount)
+                .HasColumnType("numeric(18,2)")
+                .IsRequired();
+
+            b.Property(x => x.Description)
+                .HasMaxLength(512);
+
+            b.Property(x => x.IdempotencyKey)
+                .HasMaxLength(128);
+
+            b.Property(x => x.Channel)
+                .HasMaxLength(64)
+                .IsRequired();
+
+            b.Property(x => x.Status)
+                .HasMaxLength(64)
+                .IsRequired();
+
+            b.Property(x => x.EventName)
+                .HasMaxLength(256)
+                .IsRequired();
+
+            b.Property(x => x.OccurredAtUtc)
+                .IsRequired();
+
+            b.HasIndex(x => x.EventId);
+            b.HasIndex(x => x.TransferId);
+            b.HasIndex(x => x.UserId);
+            b.HasIndex(x => x.CreationTime);
+        });
     }
 }

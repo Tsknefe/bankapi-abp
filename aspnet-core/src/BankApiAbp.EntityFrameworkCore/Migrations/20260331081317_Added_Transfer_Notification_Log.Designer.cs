@@ -3,6 +3,7 @@ using System;
 using BankApiAbp.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Volo.Abp.EntityFrameworkCore;
@@ -12,9 +13,11 @@ using Volo.Abp.EntityFrameworkCore;
 namespace BankApiAbp.Migrations
 {
     [DbContext(typeof(BankApiAbpDbContext))]
-    partial class BankApiAbpDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260331081317_Added_Transfer_Notification_Log")]
+    partial class Added_Transfer_Notification_Log
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -222,6 +225,7 @@ namespace BankApiAbp.Migrations
             modelBuilder.Entity("BankApiAbp.Banking.Messaging.TransferNotificationLog", b =>
                 {
                     b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
                     b.Property<decimal>("Amount")
