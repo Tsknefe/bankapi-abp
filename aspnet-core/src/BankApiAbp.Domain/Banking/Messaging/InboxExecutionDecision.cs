@@ -10,6 +10,8 @@ public class InboxExecutionDecision
 
     public bool IsInProgress { get; set; }
 
+    public bool IsDeadLettered { get; set; }
+
     public Guid? InboxMessageId { get; set; }
 
     public static InboxExecutionDecision Process(Guid inboxMessageId)
@@ -36,6 +38,15 @@ public class InboxExecutionDecision
         {
             ShouldProcess = false,
             IsInProgress = true
+        };
+    }
+
+    public static InboxExecutionDecision DeadLettered()
+    {
+        return new InboxExecutionDecision
+        {
+            ShouldProcess = false,
+            IsDeadLettered = true
         };
     }
 }

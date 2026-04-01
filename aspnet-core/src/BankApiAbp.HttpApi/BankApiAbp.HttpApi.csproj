@@ -15,6 +15,7 @@
   <ItemGroup>
     <PackageReference Include="AspNetCore.HealthChecks.Redis" Version="9.0.0" />
     <PackageReference Include="BCrypt.Net-Next" Version="4.1.0" />
+    <PackageReference Include="FluentAssertions" Version="8.9.0" />
     <PackageReference Include="Volo.Abp.Account.HttpApi" Version="9.0.0" />
     <PackageReference Include="Volo.Abp.Identity.HttpApi" Version="9.0.0" />
     <PackageReference Include="Volo.Abp.PermissionManagement.HttpApi" Version="9.0.0" />

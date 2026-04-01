@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Text.Json;
 using System.Threading.Tasks;
 using BankApiAbp.Banking.Messaging;
 using Microsoft.Extensions.Logging;
@@ -30,10 +31,13 @@ public class TransferAuditLogHandler :
 
     public async Task HandleEventAsync(MoneyTransferredEto eventData)
     {
+        var payloadJson = JsonSerializer.Serialize(eventData);
+
         var decision = await _inboxManager.TryBeginProcessingAsync(
             eventData.EventId,
             nameof(MoneyTransferredEto),
-            ConsumerName);
+            ConsumerName,
+            payloadJson:payloadJson);
 
         if (!decision.ShouldProcess)
         {
@@ -48,6 +52,13 @@ public class TransferAuditLogHandler :
             {
                 _logger.LogWarning(
                     "Distributed event already in progress. EventId={EventId}, Consumer={ConsumerName}",
+                    eventData.EventId, ConsumerName);
+            }
+
+            if (decision.IsDeadLettered)
+            {
+                _logger.LogWarning(
+                    "Distributed event is dead-lettered and skipped in normal flow. EventId={EventId}, Consumer={ConsumerName}",
                     eventData.EventId, ConsumerName);
             }
 
@@ -97,7 +108,10 @@ public class TransferAuditLogHandler :
         }
         catch (Exception ex)
         {
-            await _inboxManager.MarkFailedAsync(decision.InboxMessageId!.Value, ex.ToString());
+            await _inboxManager.MarkFailedAsync(
+                decision.InboxMessageId!.Value,
+                ex.ToString(),
+                ex.GetType().Name);
 
             _logger.LogError(
                 ex,
