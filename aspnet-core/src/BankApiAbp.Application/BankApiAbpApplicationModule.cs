@@ -1,4 +1,5 @@
-﻿using Volo.Abp.Account;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Volo.Abp.Account;
 using Volo.Abp.AutoMapper;
 using Volo.Abp.FeatureManagement;
 using Volo.Abp.Identity;
@@ -18,11 +19,13 @@ namespace BankApiAbp;
     typeof(AbpTenantManagementApplicationModule),
     typeof(AbpFeatureManagementApplicationModule),
     typeof(AbpSettingManagementApplicationModule)
-    )]
+)]
 public class BankApiAbpApplicationModule : AbpModule
 {
     public override void ConfigureServices(ServiceConfigurationContext context)
     {
+        context.Services.AddHttpContextAccessor();
+
         Configure<AbpAutoMapperOptions>(options =>
         {
             options.AddMaps<BankApiAbpApplicationModule>();

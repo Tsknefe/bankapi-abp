@@ -8,8 +8,8 @@ public class BankApiAbpPermissionDefinitionProvider : PermissionDefinitionProvid
 {
     public override void Define(IPermissionDefinitionContext context)
     {
-        var myGroup = context.AddGroup(BankApiAbpPermissions.GroupName);
-        //Define your own permissions here. Example:
+        var myGroup = context.GetGroupOrNull(BankApiAbpPermissions.GroupName)
+            ?? context.AddGroup(BankApiAbpPermissions.GroupName);        //Define your own permissions here. Example:
         //myGroup.AddPermission(BankApiAbpPermissions.MyPermission1, L("Permission:MyPermission1"));
     }
 

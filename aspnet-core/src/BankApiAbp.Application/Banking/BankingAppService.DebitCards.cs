@@ -1,0 +1,217 @@
+﻿using System;
+using System.Linq;
+using System.Threading.Tasks;
+using BankApiAbp.Banking.Dtos;
+using BankApiAbp.Cards;
+using BankApiAbp.Permissions;
+using BankApiAbp.Transactions;
+using Microsoft.AspNetCore.Authorization;
+using Volo.Abp;
+using Volo.Abp.Application.Dtos;
+using Volo.Abp.Authorization;
+
+namespace BankApiAbp.Banking;
+
+public partial class BankingAppService
+{
+    [Authorize(BankingPermissions.DebitCards.Create)]
+    public async Task<IdResponseDto> CreateDebitCardAsync(CreateDebitCardDto input)
+    {
+        var userId = CurrentUserIdOrThrow();
+
+        var cardNo = NormalizeCardNo(input.CardNo);
+        _ = await GetAccountOwnedAsync(input.AccountId);
+
+        var debitCardsQ = await _debitCards.GetQueryableAsync();
+        var accountsQ = await _accounts.GetQueryableAsync();
+        var customersQ = await _customers.GetQueryableAsync();
+
+        var cardExistsForUser = await AsyncExecuter.AnyAsync(
+            from dc in debitCardsQ
+            join a in accountsQ on dc.AccountId equals a.Id
+            join c in customersQ on a.CustomerId equals c.Id
+            where c.UserId == userId && dc.CardNo == cardNo
+            select dc.Id
+        );
+
+        if (cardExistsForUser)
+            throw new UserFriendlyException("Bu debit kart numarası zaten mevcut.");
+
+        var card = new DebitCard(
+            GuidGenerator.Create(),
+            input.AccountId,
+            cardNo,
+            input.ExpireAt,
+            input.Cvv
+        );
+
+        await _debitCards.InsertAsync(card, autoSave: true);
+        return new IdResponseDto { Id = card.Id };
+    }
+
+    [Authorize(BankingPermissions.DebitCards.Spend)]
+    public async Task DebitCardSpendAsync(CardSpendDto input)
+    {
+        var userId = CurrentUserIdOrThrow();
+        var operation = "debitcards.spend";
+        var key = GetIdempotencyKeyOrThrow(operation);
+
+        var cardNo = NormalizeCardNo(input.CardNo);
+        var requestHash = BuildRequestHash(cardNo, input.Amount, input.Description /*, input.Cvv*/);
+
+        var (isDuplicate, record) = await _idem.TryBeginAsync(userId, operation, key, requestHash);
+
+        if (isDuplicate)
+        {
+            if (record.Status == "Completed" && (record.ResponseStatusCode == 204 || record.ResponseStatusCode == 200))
+                return;
+
+            await _idem.GetOrThrowDuplicateResponseAsync(record);
+            return;
+        }
+
+        try
+        {
+            var card = await GetDebitCardOwnedByCardNoAsync(cardNo);
+
+            await using var handle = await _distributedLock.TryAcquireAsync(
+                $"account:{card.AccountId}",
+                TimeSpan.FromSeconds(10)
+            );
+
+            if (handle == null)
+                throw new UserFriendlyException("Hesap şu anda başka bir işlem tarafından kullanılıyor. Lütfen tekrar deneyin.");
+
+            await _retry.ExecuteAsync(async ct =>
+            {
+                var now = Clock.Now;
+
+                card.EnsureUsable(now);
+                card.VerifyCvv(input.Cvv);
+
+                var account = await _rowLock.LockAccountForUpdateAsync(card.AccountId, ct);
+                await EnsureAccountOwnedAsync(account.Id, ct);
+
+                var start = now.Date;
+                var end = start.AddDays(1);
+
+                var txQ = await _tx.GetQueryableAsync();
+                var spentToday = await AsyncExecuter.SumAsync(
+                    txQ.Where(t => t.DebitCardId == card.Id
+                                   && t.TxType == TransactionType.DebitCardSpend
+                                   && t.CreationTime >= start
+                                   && t.CreationTime < end),
+                    t => (decimal?)t.Amount) ?? 0m;
+
+                if (spentToday + input.Amount > card.DailyLimit)
+                {
+                    throw new BusinessException("DAILY_LIMIT_EXCEEDED")
+                        .WithData("Limit", card.DailyLimit)
+                        .WithData("SpentToday", spentToday)
+                        .WithData("Amount", input.Amount);
+                }
+
+                account.Withdraw(input.Amount);
+
+                await _accounts.UpdateAsync(account, autoSave: true);
+
+                await _tx.InsertAsync(new Transaction(
+                    GuidGenerator.Create(),
+                    TransactionType.DebitCardSpend,
+                    input.Amount,
+                    input.Description,
+                    account.Id,
+                    card.Id,
+                    null
+                ), autoSave: true);
+            });
+
+            await _idem.CompleteAsync(record, new { Ok = true }, 204);
+        }
+        catch (Exception ex)
+        {
+            await _idem.FailAsync(record, ex);
+            throw;
+        }
+    }
+    
+
+    [Authorize(BankingPermissions.DebitCards.SpendSummary)]
+    public async Task<CardSpendSummaryDto> GetDebitCardSpendSummaryAsync(string cardNo)
+    {
+        cardNo = NormalizeCardNo(cardNo);
+        var card = await GetDebitCardOwnedByCardNoAsync(cardNo);
+
+        var now = Clock.Now;
+        var todayStart = now.Date;
+        var tomorrow = todayStart.AddDays(1);
+
+        var monthStart = new DateTime(now.Year, now.Month, 1);
+        var nextMonth = monthStart.AddMonths(1);
+
+        var txQ = await _tx.GetQueryableAsync();
+
+        var q = txQ.Where(t => t.DebitCardId == card.Id && t.TxType == TransactionType.DebitCardSpend);
+
+        var todaySpend = await AsyncExecuter.SumAsync(
+            q.Where(t => t.CreationTime >= todayStart && t.CreationTime < tomorrow),
+            t => (decimal?)t.Amount) ?? 0m;
+
+        var monthSpend = await AsyncExecuter.SumAsync(
+            q.Where(t => t.CreationTime >= monthStart && t.CreationTime < nextMonth),
+            t => (decimal?)t.Amount) ?? 0m;
+
+        return new CardSpendSummaryDto
+        {
+            CardNo = card.CardNo,
+            Today = todayStart,
+            TodaySpend = todaySpend,
+            MonthStart = monthStart,
+            MonthSpend = monthSpend
+        };
+    }
+
+    [Authorize(BankingPermissions.DebitCards.List)]
+    public async Task<PagedResultDto<DebitCardListItemDto>> GetMyDebitCardsAsync(MyDebitCardsInput input)
+    {
+        var userId = CurrentUserIdOrThrow();
+
+        var debitCardsQ = await _debitCards.GetQueryableAsync();
+        var accountsQ = await _accounts.GetQueryableAsync();
+        var customersQ = await _customers.GetQueryableAsync();
+
+        var q =
+            from dc in debitCardsQ
+            join a in accountsQ on dc.AccountId equals a.Id
+            join c in customersQ on a.CustomerId equals c.Id
+            where c.UserId == userId
+            select dc;
+
+        if (input.AccountId.HasValue)
+            q = q.Where(dc => dc.AccountId == input.AccountId.Value);
+
+        if (!string.IsNullOrWhiteSpace(input.CardNo))
+        {
+            var cn = NormalizeCardNo(input.CardNo);
+            q = q.Where(dc => dc.CardNo == cn);
+        }
+
+        var total = await AsyncExecuter.CountAsync(q);
+        q = q.OrderBy(x => x.CardNo);
+
+        var items = await AsyncExecuter.ToListAsync(q.Skip(input.SkipCount).Take(input.MaxResultCount));
+
+        return new PagedResultDto<DebitCardListItemDto>(
+            total,
+            items.Select(dc => new DebitCardListItemDto
+            {
+                Id = dc.Id,
+                AccountId = dc.AccountId,
+                CardNo = dc.CardNo,
+                ExpireAt = dc.ExpireAt,
+                DailyLimit = dc.DailyLimit,
+                IsActive = dc.IsActive
+            }).ToList()
+        );
+    }
+}

@@ -1,4 +1,6 @@
-﻿using BankApiAbp.Cards;
+﻿using BankApiAbp.Banking;
+using BankApiAbp.Banking.Messaging;
+using BankApiAbp.Cards;
 using BankApiAbp.Entities;
 using Microsoft.EntityFrameworkCore;
 using Volo.Abp.AuditLogging.EntityFrameworkCore;
@@ -6,6 +8,8 @@ using Volo.Abp.BackgroundJobs.EntityFrameworkCore;
 using Volo.Abp.Data;
 using Volo.Abp.DependencyInjection;
 using Volo.Abp.EntityFrameworkCore;
+using Volo.Abp.EntityFrameworkCore.DistributedEvents;
+using Volo.Abp.EntityFrameworkCore.Modeling;
 using Volo.Abp.FeatureManagement.EntityFrameworkCore;
 using Volo.Abp.Identity;
 using Volo.Abp.Identity.EntityFrameworkCore;
@@ -23,24 +27,10 @@ namespace BankApiAbp.EntityFrameworkCore;
 public class BankApiAbpDbContext :
     AbpDbContext<BankApiAbpDbContext>,
     IIdentityDbContext,
-    ITenantManagementDbContext
+    ITenantManagementDbContext,
+    IHasEventInbox,
+    IHasEventOutbox
 {
-    /* Add DbSet properties for your Aggregate Roots / Entities here. */
-
-    #region Entities from the modules
-
-    /* Notice: We only implemented IIdentityDbContext and ITenantManagementDbContext
-     * and replaced them for this DbContext. This allows you to perform JOIN
-     * queries for the entities of these modules over the repositories easily. You
-     * typically don't need that for other modules. But, if you need, you can
-     * implement the DbContext interface of the needed module and use ReplaceDbContext
-     * attribute just like IIdentityDbContext and ITenantManagementDbContext.
-     *
-     * More info: Replacing a DbContext of a module ensures that the related module
-     * uses this DbContext on runtime. Otherwise, it will use its own DbContext class.
-     */
-
-    //Identity
     public DbSet<IdentityUser> Users { get; set; }
     public DbSet<IdentityRole> Roles { get; set; }
     public DbSet<IdentityClaimType> ClaimTypes { get; set; }
@@ -49,29 +39,35 @@ public class BankApiAbpDbContext :
     public DbSet<IdentityLinkUser> LinkUsers { get; set; }
     public DbSet<IdentityUserDelegation> UserDelegations { get; set; }
     public DbSet<IdentitySession> Sessions { get; set; }
+
     public DbSet<Customer> Customers { get; set; }
     public DbSet<Account> Accounts { get; set; }
     public DbSet<DebitCard> DebitCards { get; set; }
     public DbSet<CreditCard> CreditCards { get; set; }
     public DbSet<BankApiAbp.Transactions.Transaction> Transactions { get; set; }
 
-    // Tenant Management
     public DbSet<Tenant> Tenants { get; set; }
     public DbSet<TenantConnectionString> TenantConnectionStrings { get; set; }
+    public DbSet<BankingIdempotencyRecord> BankingIdempotencyRecords { get; set; }
+    public DbSet<LedgerEntry> LedgerEntries { get; set; }
 
-    #endregion
+    public DbSet<IncomingEventRecord> IncomingEvents { get; set; }
+    public DbSet<OutgoingEventRecord> OutgoingEvents { get; set; }
+
+    public DbSet<InboxMessage> InboxMessages { get; set; }
+
+    public DbSet<TransferAuditLog> TransferAuditLogs { get; set; }
+
+    public DbSet<TransferNotificationLog> TransferNotificationLogs { get; set; }
 
     public BankApiAbpDbContext(DbContextOptions<BankApiAbpDbContext> options)
         : base(options)
     {
-
     }
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
-
-        /* Include modules to your migration db context */
 
         builder.ConfigurePermissionManagement();
         builder.ConfigureSettingManagement();
@@ -81,16 +77,22 @@ public class BankApiAbpDbContext :
         builder.ConfigureOpenIddict();
         builder.ConfigureFeatureManagement();
         builder.ConfigureTenantManagement();
+
+        builder.ConfigureEventInbox();
+        builder.ConfigureEventOutbox();
+
         builder.ConfigureBankApiAbp();
         builder.ConfigureBanking();
 
-        /* Configure your own tables/entities inside here */
+        builder.Entity<LedgerEntry>(b =>
+        {
+            b.ToTable("AppLedgerEntries");
 
-        //builder.Entity<YourEntity>(b =>
-        //{
-        //    b.ToTable(BankApiAbpConsts.DbTablePrefix + "YourEntities", BankApiAbpC    onsts.DbSchema);
-        //    b.ConfigureByConvention(); //auto configure for the base class props
-        //    //...
-        //});
+            b.ConfigureByConvention();
+
+            b.Property(x => x.Description).HasMaxLength(256);
+            b.Property(x => x.Amount).HasColumnType("numeric(18,2)");
+            b.Property(x => x.BalanceAfter).HasColumnType("numeric(18,2)");
+        });
     }
 }

@@ -1,22 +1,27 @@
-﻿using System.Threading.Tasks;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
+﻿using BankApiAbp.HttpApi.Client.ConsoleTestApp;
+using System.Net.Http;
 
-namespace BankApiAbp.HttpApi.Client.ConsoleTestApp;
+var baseUrl = "https://localhost:44389";
 
-class Program
+var accountA = Guid.Parse("3a1f9cad-8add-0dd1-3772-511a6d1f7204");
+var accountB = Guid.Parse("3a1fb18d-4621-d1a4-d3e5-a2062ace7fa9");
+
+var handler = new HttpClientHandler
 {
-    static async Task Main(string[] args)
-    {
-        await CreateHostBuilder(args).RunConsoleAsync();
-    }
+    ServerCertificateCustomValidationCallback =
+        HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+};
 
-    public static IHostBuilder CreateHostBuilder(string[] args) =>
-        Host.CreateDefaultBuilder(args)
-            .AddAppSettingsSecretsJson()
-            .ConfigureServices((hostContext, services) =>
-            {
-                services.AddHostedService<ConsoleTestAppHostedService>();
-            });
-}
+using var httpClient = new HttpClient(handler)
+{
+    BaseAddress = new Uri(baseUrl)
+};
+
+var runner = new ScenarioRunner(httpClient);
+
+await runner.RunAsync(
+    username: "efe",
+    password: "Qwe123!",
+    accountA: accountA,
+    accountB: accountB
+);
