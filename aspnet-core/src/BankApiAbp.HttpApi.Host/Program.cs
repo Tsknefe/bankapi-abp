@@ -2,6 +2,7 @@
 using System.Security.Claims;
 using System.Threading.RateLimiting;
 using System.Threading.Tasks;
+using BankApiAbp.Banking.Messaging;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
@@ -167,7 +168,8 @@ public class Program
                     metrics
                         .AddAspNetCoreInstrumentation()
                         .AddHttpClientInstrumentation()
-                        .AddRuntimeInstrumentation();
+                        .AddRuntimeInstrumentation()
+                        .AddMeter(InboxMetrics.MeterName);
 
                     var otlpEndpoint = builder.Configuration["OpenTelemetry:Otlp:Endpoint"];
                     if (!string.IsNullOrWhiteSpace(otlpEndpoint))
@@ -182,8 +184,9 @@ public class Program
             await builder.AddApplicationAsync<BankApiAbpHttpApiHostModule>();
 
             var app = builder.Build();
+
             if (app.Environment.IsEnvironment("Test") ||
-    app.Environment.IsEnvironment("RateLimitTest"))
+                app.Environment.IsEnvironment("RateLimitTest"))
             {
                 app.Use(async (context, next) =>
                 {

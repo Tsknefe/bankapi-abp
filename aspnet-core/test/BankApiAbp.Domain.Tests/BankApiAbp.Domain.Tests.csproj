@@ -20,4 +20,8 @@
     <ProjectReference Include="..\BankApiAbp.TestBase\BankApiAbp.TestBase.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Banking\Messaging\" />
+  </ItemGroup>
+
 </Project>

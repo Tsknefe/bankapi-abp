@@ -35,6 +35,20 @@ public static class TestClientFactory
                 });
             });
 
+    public static IServiceProvider ServiceProvider => TestFactory.Services;
+
+    public static IServiceScope CreateScope()
+    {
+        EnsureSeededAsync(TestFactory).GetAwaiter().GetResult();
+        return TestFactory.Services.CreateScope();
+    }
+
+    public static IServiceScope CreateRateLimitScope()
+    {
+        EnsureSeededAsync(RateLimitFactory).GetAwaiter().GetResult();
+        return RateLimitFactory.Services.CreateScope();
+    }
+
     public static HttpClient CreateClient()
     {
         EnsureSeededAsync(TestFactory).GetAwaiter().GetResult();

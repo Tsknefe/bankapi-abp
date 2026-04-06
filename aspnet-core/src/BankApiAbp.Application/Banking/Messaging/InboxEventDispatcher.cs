@@ -30,15 +30,21 @@ public class InboxEventDispatcher : IInboxEventDispatcher, ITransientDependency
         var inboxMessage = await _inboxRepository.GetAsync(inboxMessageId);
 
         if (string.IsNullOrWhiteSpace(inboxMessage.PayloadJson))
-            throw new BusinessException("Inbox message payload is empty.");
+        {
+            throw new BusinessException(message: "Inbox message payload is empty.");
+        }
 
         if (inboxMessage.EventName != nameof(MoneyTransferredEto))
-            throw new BusinessException($"Unsupported event type: {inboxMessage.EventName}");
+        {
+            throw new BusinessException(message: $"Unsupported event type: {inboxMessage.EventName}");
+        }
 
         var eventData = JsonSerializer.Deserialize<MoneyTransferredEto>(inboxMessage.PayloadJson);
 
         if (eventData == null)
-            throw new BusinessException("Inbox message payload could not be deserialized.");
+        {
+            throw new BusinessException(message: "Inbox message payload could not be deserialized.");
+        }
 
         if (inboxMessage.ConsumerName == nameof(TransferAuditLogHandler))
         {
@@ -52,6 +58,6 @@ public class InboxEventDispatcher : IInboxEventDispatcher, ITransientDependency
             return;
         }
 
-        throw new BusinessException($"Unsupported consumer: {inboxMessage.ConsumerName}");
+        throw new BusinessException(message: $"Unsupported consumer: {inboxMessage.ConsumerName}");
     }
 }
