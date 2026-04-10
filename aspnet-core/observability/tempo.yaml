@@ -1,0 +1,33 @@
+server:
+  http_listen_port: 3200
+  grpc_server_max_recv_msg_size: 10485760
+  grpc_server_max_send_msg_size: 10485760
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+ingester:
+  trace_idle_period: 10s
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    block_retention: 24h
+
+querier: {}
+
+query_frontend:
+  search:
+    duration_slo: 5s
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /tmp/tempo

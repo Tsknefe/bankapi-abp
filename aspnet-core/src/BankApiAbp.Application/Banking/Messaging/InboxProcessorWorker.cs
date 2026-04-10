@@ -60,6 +60,8 @@ public class InboxProcessorWorker : BackgroundService, ITransientDependency
 
     private async Task ProcessBatchAsync(CancellationToken cancellationToken)
     {
+        using var batchActivity = InboxTracing.ActivitySource.StartActivity("inbox.process.batch");
+
         using var scope = _scopeFactory.CreateScope();
 
         var distributedLock = scope.ServiceProvider.GetRequiredService<IAbpDistributedLock>();
@@ -71,9 +73,12 @@ public class InboxProcessorWorker : BackgroundService, ITransientDependency
 
         if (lockHandle == null)
         {
+            batchActivity?.SetTag("inbox.lock.acquired", false);
             _logger.LogDebug("InboxProcessorWorker skipped because distributed lock could not be acquired.");
             return;
         }
+
+        batchActivity?.SetTag("inbox.lock.acquired", true);
 
         var uowManager = scope.ServiceProvider.GetRequiredService<IUnitOfWorkManager>();
         var inboxRepository = scope.ServiceProvider.GetRequiredService<IRepository<InboxMessage, Guid>>();
@@ -98,6 +103,8 @@ public class InboxProcessorWorker : BackgroundService, ITransientDependency
 
             await uow.CompleteAsync();
         }
+
+        batchActivity?.SetTag("inbox.batch.size", messageIds.Length);
 
         if (messageIds.Length == 0)
         {
@@ -133,6 +140,8 @@ public class InboxProcessorWorker : BackgroundService, ITransientDependency
         string? payloadHash;
         string? payloadJson;
         int maxRetryCount;
+        int retryCount;
+        string status;
 
         using (var readUow = uowManager.Begin(requiresNew: true, isTransactional: false))
         {
@@ -144,9 +153,21 @@ public class InboxProcessorWorker : BackgroundService, ITransientDependency
             payloadHash = msg.PayloadHash;
             payloadJson = msg.PayloadJson;
             maxRetryCount = msg.MaxRetryCount;
+            retryCount = msg.RetryCount;
+            status = msg.Status.ToString();
 
             await readUow.CompleteAsync();
         }
+
+        using var activity = InboxTracing.ActivitySource.StartActivity("inbox.process.message");
+
+        activity?.SetTag("inbox.message.id", inboxMessageId);
+        activity?.SetTag("inbox.event.id", eventId);
+        activity?.SetTag("inbox.event.name", eventName);
+        activity?.SetTag("inbox.consumer.name", consumerName);
+        activity?.SetTag("inbox.retry.count", retryCount);
+        activity?.SetTag("inbox.max_retry.count", maxRetryCount);
+        activity?.SetTag("inbox.status", status);
 
         var decision = await inboxManager.TryBeginProcessingAsync(
             eventId,
@@ -156,8 +177,12 @@ public class InboxProcessorWorker : BackgroundService, ITransientDependency
             payloadJson,
             maxRetryCount);
 
+        activity?.SetTag("inbox.should_process", decision.ShouldProcess);
+
         if (!decision.ShouldProcess)
         {
+            activity?.SetTag("inbox.result", "skipped");
+
             _logger.LogDebug(
                 "Inbox message skipped. InboxMessageId={InboxMessageId}",
                 inboxMessageId);
@@ -166,6 +191,8 @@ public class InboxProcessorWorker : BackgroundService, ITransientDependency
         }
 
         var actualInboxMessageId = decision.InboxMessageId ?? inboxMessageId;
+        activity?.SetTag("inbox.actual_message.id", actualInboxMessageId);
+
         var sw = Stopwatch.StartNew();
 
         try
@@ -179,6 +206,9 @@ public class InboxProcessorWorker : BackgroundService, ITransientDependency
             InboxMetrics.MessagesProcessed.Add(1);
             InboxMetrics.ProcessingDurationMs.Record(sw.Elapsed.TotalMilliseconds);
 
+            activity?.SetTag("inbox.result", "processed");
+            activity?.SetTag("inbox.processing.duration.ms", sw.Elapsed.TotalMilliseconds);
+
             _logger.LogInformation(
                 "Inbox message processed successfully. InboxMessageId={InboxMessageId}",
                 actualInboxMessageId);
@@ -186,6 +216,9 @@ public class InboxProcessorWorker : BackgroundService, ITransientDependency
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             sw.Stop();
+
+            activity?.SetTag("inbox.result", "cancelled");
+            activity?.SetTag("inbox.processing.duration.ms", sw.Elapsed.TotalMilliseconds);
 
             _logger.LogInformation(
                 "Inbox message processing cancelled. InboxMessageId={InboxMessageId}",
@@ -198,6 +231,12 @@ public class InboxProcessorWorker : BackgroundService, ITransientDependency
             sw.Stop();
             InboxMetrics.MessagesFailed.Add(1);
             InboxMetrics.ProcessingDurationMs.Record(sw.Elapsed.TotalMilliseconds);
+
+            activity?.SetTag("inbox.result", "failed");
+            activity?.SetTag("inbox.processing.duration.ms", sw.Elapsed.TotalMilliseconds);
+            activity?.SetTag("exception.type", ex.GetType().FullName);
+            activity?.SetTag("exception.message", ex.Message);
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
 
             await inboxManager.MarkFailedAsync(
                 actualInboxMessageId,
