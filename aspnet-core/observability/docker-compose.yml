@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   tempo:
     image: grafana/tempo:2.7.1
@@ -11,6 +9,12 @@ services:
       - "3200:3200"
       - "4319:4317"
       - "4320:4318"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:3200/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
     restart: unless-stopped
 
   otel-collector:
@@ -24,7 +28,8 @@ services:
       - "4318:4318"
       - "13133:13133"
     depends_on:
-      - tempo
+      tempo:
+        condition: service_healthy
     restart: unless-stopped
 
   prometheus:
@@ -37,7 +42,7 @@ services:
     ports:
       - "9090:9090"
     depends_on:
-      - tempo
+      - otel-collector
     restart: unless-stopped
 
   grafana:
@@ -48,7 +53,8 @@ services:
     volumes:
       - grafana-storage:/var/lib/grafana
     depends_on:
-      - tempo
+      tempo:
+        condition: service_healthy
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin

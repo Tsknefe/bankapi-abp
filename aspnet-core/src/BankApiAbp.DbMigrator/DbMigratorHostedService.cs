@@ -58,6 +58,11 @@ public class DbMigratorHostedService : IHostedService
                 .GetRequiredService<TestUserPasswordSeeder>()
                 .SeedAsync();
 
+            await application
+    .ServiceProvider
+    .GetRequiredService<DemoBankingDataSeeder>()
+    .SeedAsync();
+
             await application.ShutdownAsync();
 
             _hostApplicationLifetime.StopApplication();

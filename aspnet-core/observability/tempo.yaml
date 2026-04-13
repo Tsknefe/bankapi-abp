@@ -1,7 +1,5 @@
 server:
   http_listen_port: 3200
-  grpc_server_max_recv_msg_size: 10485760
-  grpc_server_max_send_msg_size: 10485760
 
 distributor:
   receivers:
@@ -30,4 +28,4 @@ storage:
   trace:
     backend: local
     local:
-      path: /tmp/tempo
+      path: /tmp/tempo/traces

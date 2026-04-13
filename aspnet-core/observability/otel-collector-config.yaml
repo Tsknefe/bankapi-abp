@@ -10,22 +10,21 @@ processors:
   batch:
 
 exporters:
-  debug:
-    verbosity: detailed
-
   otlp/tempo:
     endpoint: tempo:4317
     tls:
       insecure: true
+
+  debug:
+    verbosity: detailed
 
 extensions:
   health_check:
 
 service:
   extensions: [health_check]
-
   pipelines:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [debug, otlp/tempo]
+      exporters: [otlp/tempo, debug]
