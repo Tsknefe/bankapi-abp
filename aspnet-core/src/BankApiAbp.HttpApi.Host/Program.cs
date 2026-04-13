@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -22,8 +23,10 @@ namespace BankApiAbp;
 
 public class Program
 {
-    public async static Task<int> Main(string[] args)
+    public static async Task<int> Main(string[] args)
     {
+        AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
+
         Log.Logger = new LoggerConfiguration()
 #if DEBUG
             .MinimumLevel.Debug()
@@ -46,7 +49,9 @@ public class Program
             builder.Host.UseAutofac();
             builder.Host.UseSerilog();
 
-            var elasticUri = builder.Configuration["ElasticConfiguration:Uri"];
+            var elasticUri =
+                builder.Configuration["Elastic:Uri"] ??
+                builder.Configuration["ElasticConfiguration:Uri"];
 
             if (!string.IsNullOrWhiteSpace(elasticUri))
             {
@@ -71,6 +76,21 @@ public class Program
                 builder.Host.UseSerilog();
             }
 
+            var environmentName = builder.Environment.EnvironmentName;
+            var contentRoot = builder.Environment.ContentRootPath;
+
+            var otlpEndpoint =
+                builder.Configuration["OpenTelemetry:Otlp:Endpoint"] ??
+                "http://localhost:4317";
+
+            Console.WriteLine($"ENVIRONMENT = {environmentName}");
+            Console.WriteLine($"CONTENT ROOT = {contentRoot}");
+            Console.WriteLine($"OTLP ENDPOINT = {otlpEndpoint}");
+
+            Log.Information("Environment: {EnvironmentName}", environmentName);
+            Log.Information("ContentRoot: {ContentRoot}", contentRoot);
+            Log.Information("OTLP endpoint: {OtlpEndpoint}", otlpEndpoint);
+
             builder.Services.AddRateLimiter(options =>
             {
                 options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -88,9 +108,20 @@ public class Program
                     var globalPermit = builder.Configuration.GetValue<int?>("RateLimiting:Global:PermitLimit") ?? 100;
                     var globalWindowSeconds = builder.Configuration.GetValue<int?>("RateLimiting:Global:WindowSeconds") ?? 60;
 
-                    var transferTokenLimit = builder.Configuration.GetValue<int?>("RateLimiting:Transfer:TokenLimit") ?? 5;
-                    var transferTokensPerPeriod = builder.Configuration.GetValue<int?>("RateLimiting:Transfer:TokensPerPeriod") ?? 5;
-                    var transferPeriodSeconds = builder.Configuration.GetValue<int?>("RateLimiting:Transfer:PeriodSeconds") ?? 60;
+                    var transferTokenLimit =
+                        builder.Configuration.GetValue<int?>("RateLimiting:TransferPolicy:TokenLimit")
+                        ?? builder.Configuration.GetValue<int?>("RateLimiting:Transfer:TokenLimit")
+                        ?? 5;
+
+                    var transferTokensPerPeriod =
+                        builder.Configuration.GetValue<int?>("RateLimiting:TransferPolicy:TokensPerPeriod")
+                        ?? builder.Configuration.GetValue<int?>("RateLimiting:Transfer:TokensPerPeriod")
+                        ?? 5;
+
+                    var transferPeriodSeconds =
+                        builder.Configuration.GetValue<int?>("RateLimiting:TransferPolicy:PeriodSeconds")
+                        ?? builder.Configuration.GetValue<int?>("RateLimiting:Transfer:PeriodSeconds")
+                        ?? 60;
 
                     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
                     {
@@ -150,18 +181,15 @@ public class Program
                 .WithTracing(tracing =>
                 {
                     tracing
+                        .AddSource(InboxTracing.ActivitySourceName)
                         .AddAspNetCoreInstrumentation()
                         .AddHttpClientInstrumentation()
-                        .AddEntityFrameworkCoreInstrumentation();
-
-                    var otlpEndpoint = builder.Configuration["OpenTelemetry:Otlp:Endpoint"];
-                    if (!string.IsNullOrWhiteSpace(otlpEndpoint))
-                    {
-                        tracing.AddOtlpExporter(options =>
+                        .AddEntityFrameworkCoreInstrumentation()
+                        .AddOtlpExporter(options =>
                         {
                             options.Endpoint = new Uri(otlpEndpoint);
+                            options.Protocol = OtlpExportProtocol.Grpc;
                         });
-                    }
                 })
                 .WithMetrics(metrics =>
                 {
@@ -169,16 +197,12 @@ public class Program
                         .AddAspNetCoreInstrumentation()
                         .AddHttpClientInstrumentation()
                         .AddRuntimeInstrumentation()
-                        .AddMeter(InboxMetrics.MeterName);
-
-                    var otlpEndpoint = builder.Configuration["OpenTelemetry:Otlp:Endpoint"];
-                    if (!string.IsNullOrWhiteSpace(otlpEndpoint))
-                    {
-                        metrics.AddOtlpExporter(options =>
+                        .AddMeter(InboxMetrics.MeterName)
+                        .AddOtlpExporter(options =>
                         {
                             options.Endpoint = new Uri(otlpEndpoint);
+                            options.Protocol = OtlpExportProtocol.Grpc;
                         });
-                    }
                 });
 
             await builder.AddApplicationAsync<BankApiAbpHttpApiHostModule>();
