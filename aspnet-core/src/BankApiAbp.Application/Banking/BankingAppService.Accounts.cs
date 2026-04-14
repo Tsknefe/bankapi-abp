@@ -64,8 +64,13 @@ public partial class BankingAppService
         var key = GetIdempotencyKeyOrThrow(operation);
         var requestHash = BuildRequestHash(input.AccountId, input.Amount, input.Description);
 
+        using var idemSpan = ActivitySource.StartActivity("Banking.Deposit.Idempotency");
+
         var (isDuplicate, record) =
             await _idem.TryBeginAsync(userId, operation, key, requestHash);
+
+        idemSpan?.SetTag("idempotency.key", key);
+        idemSpan?.SetTag("idempotency.duplicate", isDuplicate);
 
         if (isDuplicate)
         {
@@ -78,7 +83,8 @@ public partial class BankingAppService
             if (record.Status == "Completed" && record.ResponseJson != null)
             {
                 var cached = JsonSerializer.Deserialize<DepositResultDto>(record.ResponseJson);
-                if (cached != null) return cached;
+                if (cached != null)
+                    return cached;
             }
 
             await _idem.GetOrThrowDuplicateResponseAsync(record);
@@ -87,21 +93,32 @@ public partial class BankingAppService
 
         try
         {
+            using var lockSpan = ActivitySource.StartActivity("Banking.Deposit.Lock");
+
             await using var handle = await _distributedLock.TryAcquireAsync(
                 $"account:{input.AccountId}",
                 TimeSpan.FromSeconds(10)
             );
 
             if (handle == null)
+            {
+                lockSpan?.SetTag("lock.acquired", false);
                 throw new UserFriendlyException("Hesap şu anda başka bir işlem tarafından kullanılıyor. Lütfen tekrar deneyin.");
+            }
+
+            lockSpan?.SetTag("lock.acquired", true);
 
             Guid txId = default;
             decimal newBalance = 0m;
+
+            using var dbSpan = ActivitySource.StartActivity("Banking.Deposit.DatabaseWork");
 
             await _retry.ExecuteAsync(async ct =>
             {
                 var account = await _rowLock.LockAccountForUpdateAsync(input.AccountId, ct);
                 await EnsureAccountOwnedAsync(account.Id, ct);
+
+                dbSpan?.SetTag("balance.before", account.Balance);
 
                 account.Deposit(input.Amount);
                 await _accounts.UpdateAsync(account, autoSave: true);
@@ -130,7 +147,17 @@ public partial class BankingAppService
                 await _ledgerEntryRepository.InsertAsync(ledgerEntry, autoSave: true);
 
                 newBalance = account.Balance;
+
+                dbSpan?.SetTag("transaction.id", txId.ToString());
+                dbSpan?.SetTag("balance.after", newBalance);
             });
+
+            using (var cacheSpan = ActivitySource.StartActivity("Banking.Deposit.CacheInvalidate"))
+            {
+                await _bankingCacheManager.InvalidateAccountReadModelsAsync(userId, input.AccountId);
+                cacheSpan?.SetTag("cache.invalidated", true);
+                cacheSpan?.SetTag("account.id", input.AccountId.ToString());
+            }
 
             var result = new DepositResultDto
             {
@@ -141,12 +168,14 @@ public partial class BankingAppService
                 ProcessedAtUtc = Clock.Now
             };
 
-            await _bankingCacheManager.InvalidateAccountReadModelsAsync(userId, input.AccountId);
             await _idem.CompleteAsync(record, result, 200);
             return result;
         }
         catch (Exception ex)
         {
+            activity?.SetTag("error", true);
+            activity?.SetTag("exception", ex.Message);
+
             await _idem.FailAsync(record, ex);
             throw;
         }
@@ -164,8 +193,13 @@ public partial class BankingAppService
         var key = GetIdempotencyKeyOrThrow(operation);
         var requestHash = BuildRequestHash(input.AccountId, input.Amount, input.Description);
 
+        using var idemSpan = ActivitySource.StartActivity("Banking.Withdraw.Idempotency");
+
         var (isDuplicate, record) =
             await _idem.TryBeginAsync(userId, operation, key, requestHash);
+
+        idemSpan?.SetTag("idempotency.key", key);
+        idemSpan?.SetTag("idempotency.duplicate", isDuplicate);
 
         if (isDuplicate)
         {
@@ -178,7 +212,8 @@ public partial class BankingAppService
             if (record.Status == "Completed" && record.ResponseJson != null)
             {
                 var cached = JsonSerializer.Deserialize<WithdrawResultDto>(record.ResponseJson);
-                if (cached != null) return cached;
+                if (cached != null)
+                    return cached;
             }
 
             await _idem.GetOrThrowDuplicateResponseAsync(record);
@@ -187,21 +222,32 @@ public partial class BankingAppService
 
         try
         {
+            using var lockSpan = ActivitySource.StartActivity("Banking.Withdraw.Lock");
+
             await using var handle = await _distributedLock.TryAcquireAsync(
                 $"account:{input.AccountId}",
                 TimeSpan.FromSeconds(10)
             );
 
             if (handle == null)
+            {
+                lockSpan?.SetTag("lock.acquired", false);
                 throw new UserFriendlyException("Hesap şu anda başka bir işlem tarafından kullanılıyor. Lütfen tekrar deneyin.");
+            }
+
+            lockSpan?.SetTag("lock.acquired", true);
 
             Guid txId = default;
             decimal newBalance = 0m;
+
+            using var dbSpan = ActivitySource.StartActivity("Banking.Withdraw.DatabaseWork");
 
             await _retry.ExecuteAsync(async ct =>
             {
                 var account = await _rowLock.LockAccountForUpdateAsync(input.AccountId, ct);
                 await EnsureAccountOwnedAsync(account.Id, ct);
+
+                dbSpan?.SetTag("balance.before", account.Balance);
 
                 account.Withdraw(input.Amount);
                 await _accounts.UpdateAsync(account, autoSave: true);
@@ -230,7 +276,17 @@ public partial class BankingAppService
                 await _ledgerEntryRepository.InsertAsync(ledgerEntry, autoSave: true);
 
                 newBalance = account.Balance;
+
+                dbSpan?.SetTag("transaction.id", txId.ToString());
+                dbSpan?.SetTag("balance.after", newBalance);
             });
+
+            using (var cacheSpan = ActivitySource.StartActivity("Banking.Withdraw.CacheInvalidate"))
+            {
+                await _bankingCacheManager.InvalidateAccountReadModelsAsync(userId, input.AccountId);
+                cacheSpan?.SetTag("cache.invalidated", true);
+                cacheSpan?.SetTag("account.id", input.AccountId.ToString());
+            }
 
             var result = new WithdrawResultDto
             {
@@ -241,12 +297,14 @@ public partial class BankingAppService
                 ProcessedAtUtc = Clock.Now
             };
 
-            await _bankingCacheManager.InvalidateAccountReadModelsAsync(userId, input.AccountId);
             await _idem.CompleteAsync(record, result, 200);
             return result;
         }
         catch (Exception ex)
         {
+            activity?.SetTag("error", true);
+            activity?.SetTag("exception", ex.Message);
+
             await _idem.FailAsync(record, ex);
             throw;
         }
@@ -471,21 +529,26 @@ public partial class BankingAppService
             input.Description
         );
 
+        using var idemSpan = ActivitySource.StartActivity("Banking.Transfer.Idempotency");
+
         var (isDuplicate, record) =
             await _idem.TryBeginAsync(userId, operation, key, requestHash);
+
+        idemSpan?.SetTag("idempotency.key", key);
+        idemSpan?.SetTag("idempotency.duplicate", isDuplicate);
 
         if (isDuplicate)
         {
             if (!string.Equals(record.RequestHash, requestHash, StringComparison.Ordinal))
             {
-                throw new BusinessException("IDEMPOTENCY_KEY_REUSE_WITH_DIFFERENT_PAYLOAD")
-                    .WithData("message", "Aynı Idempotency-Key farklı istek gövdesi ile kullanılamaz.");
+                throw new BusinessException("IDEMPOTENCY_KEY_REUSE_WITH_DIFFERENT_PAYLOAD");
             }
 
             if (record.Status == "Completed" && record.ResponseJson != null)
             {
                 var cached = JsonSerializer.Deserialize<TransferResultDto>(record.ResponseJson);
-                if (cached != null) return cached;
+                if (cached != null)
+                    return cached;
             }
 
             await _idem.GetOrThrowDuplicateResponseAsync(record);
@@ -502,24 +565,40 @@ public partial class BankingAppService
             var first = a.CompareTo(b) < 0 ? a : b;
             var second = a.CompareTo(b) < 0 ? b : a;
 
+            using var lockSpan = ActivitySource.StartActivity("Banking.Transfer.Locks");
+
             await using var lock1 = await _distributedLock.TryAcquireAsync(
                 $"account:{first}",
                 TimeSpan.FromSeconds(10)
             );
+
             if (lock1 == null)
-                throw new UserFriendlyException("Hesap şu anda başka bir işlem tarafından kullanılıyor. Lütfen tekrar deneyin.");
+            {
+                lockSpan?.SetTag("lock.first", false);
+                throw new UserFriendlyException("Hesap kilitlenemedi");
+            }
+
+            lockSpan?.SetTag("lock.first", true);
 
             await using var lock2 = await _distributedLock.TryAcquireAsync(
                 $"account:{second}",
                 TimeSpan.FromSeconds(10)
             );
+
             if (lock2 == null)
-                throw new UserFriendlyException("Hesap şu anda başka bir işlem tarafından kullanılıyor. Lütfen tekrar deneyin.");
+            {
+                lockSpan?.SetTag("lock.second", false);
+                throw new UserFriendlyException("Hesap kilitlenemedi");
+            }
+
+            lockSpan?.SetTag("lock.second", true);
 
             Guid txOutId = default;
             Guid txInId = default;
             decimal fromNew = 0m;
             decimal toNew = 0m;
+
+            using var dbSpan = ActivitySource.StartActivity("Banking.Transfer.DatabaseWork");
 
             await _retry.ExecuteAsync(async ct =>
             {
@@ -529,13 +608,17 @@ public partial class BankingAppService
                 var fromAcc = input.FromAccountId == first ? firstAcc : secondAcc;
                 var toAcc = input.ToAccountId == first ? firstAcc : secondAcc;
 
+                dbSpan?.SetTag("from.balance.before", fromAcc.Balance);
+                dbSpan?.SetTag("to.balance.before", toAcc.Balance);
+
                 await EnsureAccountOwnedAsync(fromAcc.Id, ct);
                 await EnsureAccountOwnedAsync(toAcc.Id, ct);
 
                 if (fromAcc.Balance < input.Amount)
-                    throw new BusinessException("INSUFFICIENT_BALANCE")
-                        .WithData("Balance", fromAcc.Balance)
-                        .WithData("Amount", input.Amount);
+                {
+                    dbSpan?.SetTag("error", "INSUFFICIENT_BALANCE");
+                    throw new BusinessException("INSUFFICIENT_BALANCE");
+                }
 
                 fromAcc.Withdraw(input.Amount);
                 toAcc.Deposit(input.Amount);
@@ -550,7 +633,7 @@ public partial class BankingAppService
                     txOutId,
                     TransactionType.TransferOut,
                     input.Amount,
-                    input.Description ?? $"Transfer to {toAcc.Iban}",
+                    input.Description,
                     fromAcc.Id,
                     null,
                     null
@@ -560,38 +643,49 @@ public partial class BankingAppService
                     txInId,
                     TransactionType.TransferIn,
                     input.Amount,
-                    input.Description ?? $"Transfer from {fromAcc.Iban}",
+                    input.Description,
                     toAcc.Id,
                     null,
                     null
                 ), autoSave: true);
 
-                var debitEntry = new LedgerEntry(
-                    GuidGenerator.Create(),
-                    txOutId,
-                    fromAcc.Id,
-                    LedgerDirection.Debit,
-                    input.Amount,
-                    fromAcc.Balance,
-                    input.Description ?? $"Transfer to {toAcc.Iban}"
-                );
-
-                var creditEntry = new LedgerEntry(
-                    GuidGenerator.Create(),
-                    txInId,
-                    toAcc.Id,
-                    LedgerDirection.Credit,
-                    input.Amount,
-                    toAcc.Balance,
-                    input.Description ?? $"Transfer from {fromAcc.Iban}"
-                );
-
-                await _ledgerEntryRepository.InsertAsync(debitEntry, autoSave: true);
-                await _ledgerEntryRepository.InsertAsync(creditEntry, autoSave: true);
-
                 fromNew = fromAcc.Balance;
                 toNew = toAcc.Balance;
+
+                dbSpan?.SetTag("from.balance.after", fromNew);
+                dbSpan?.SetTag("to.balance.after", toNew);
             });
+
+            using (var eventSpan = ActivitySource.StartActivity("Banking.Transfer.PublishEvent"))
+            {
+                await _distributedEventBus.PublishAsync(
+                    new MoneyTransferredEto
+                    {
+                        EventId = Guid.NewGuid(),
+                        TransferId = txOutId,
+                        FromAccountId = input.FromAccountId,
+                        ToAccountId = input.ToAccountId,
+                        Amount = input.Amount,
+                        Description = input.Description,
+                        OccurredAtUtc = Clock.Now,
+                        IdempotencyKey = key,
+                        UserId = userId
+                    }
+                );
+
+                eventSpan?.SetTag("event.published", true);
+                eventSpan?.SetTag("transfer.id", txOutId.ToString());
+            }
+
+            using (var cacheSpan = ActivitySource.StartActivity("Banking.Transfer.CacheInvalidate"))
+            {
+                await _bankingCacheManager.InvalidateAccountReadModelsAsync(userId, input.FromAccountId);
+                await _bankingCacheManager.InvalidateAccountReadModelsAsync(userId, input.ToAccountId);
+
+                cacheSpan?.SetTag("cache.invalidated", true);
+                cacheSpan?.SetTag("from.account", input.FromAccountId.ToString());
+                cacheSpan?.SetTag("to.account", input.ToAccountId.ToString());
+            }
 
             var result = new TransferResultDto
             {
@@ -606,29 +700,14 @@ public partial class BankingAppService
                 ProcessedAtUtc = Clock.Now
             };
 
-            await _bankingCacheManager.InvalidateAccountReadModelsAsync(userId, input.FromAccountId);
-            await _bankingCacheManager.InvalidateAccountReadModelsAsync(userId, input.ToAccountId);
-
-            await _distributedEventBus.PublishAsync(
-                new MoneyTransferredEto
-                {
-                    EventId = Guid.NewGuid(),
-
-                    TransferId = txOutId,
-                    FromAccountId = input.FromAccountId,
-                    ToAccountId = input.ToAccountId,
-                    Amount = input.Amount,
-                    Description = input.Description,
-                    OccurredAtUtc = Clock.Now,
-                    IdempotencyKey = key,
-                    UserId = userId
-                }
-            );
             await _idem.CompleteAsync(record, result, 200);
             return result;
         }
         catch (Exception ex)
         {
+            activity?.SetTag("error", true);
+            activity?.SetTag("exception", ex.Message);
+
             await _idem.FailAsync(record, ex);
             throw;
         }

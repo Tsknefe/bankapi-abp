@@ -54,7 +54,6 @@ public partial class BankingAppService : ApplicationService, IBankingAppService
         _rowLock = rowLock;
         _idem = idem;
         _http = http;
-
         _distributedLock = distributedLock;
         _ledgerEntryRepository = ledgerEntryRepository;
         _bankingCacheManager = bankingCacheManager;

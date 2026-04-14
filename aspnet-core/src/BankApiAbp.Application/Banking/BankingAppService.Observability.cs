@@ -4,5 +4,7 @@ namespace BankApiAbp.Banking;
 
 public partial class BankingAppService
 {
-    private static readonly ActivitySource ActivitySource = new("BankApiAbp.Banking");
+    public const string ActivitySourceName = "BankingTracing";
+
+    private static readonly ActivitySource ActivitySource = new(ActivitySourceName);
 }
