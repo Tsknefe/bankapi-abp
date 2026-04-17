@@ -7,6 +7,8 @@ using Volo.Abp.Domain.Repositories;
 using BankApiAbp.Banking.Infrastructure;
 using Microsoft.AspNetCore.Http;
 using Volo.Abp.DistributedLocking;
+using BankApiAbp.Banking.Caching;
+using Volo.Abp.EventBus.Distributed;
 
 namespace BankApiAbp.Banking;
 
@@ -23,6 +25,9 @@ public partial class BankingAppService : ApplicationService, IBankingAppService
     private readonly IdempotencyGate _idem;
     private readonly IHttpContextAccessor _http;
     private readonly IAbpDistributedLock _distributedLock;
+    private readonly IRepository<LedgerEntry, Guid> _ledgerEntryRepository;
+    private readonly IBankingCacheManager _bankingCacheManager;
+    private readonly IDistributedEventBus _distributedEventBus;
 
     public BankingAppService(
         IRepository<Customer, Guid> customers,
@@ -34,7 +39,10 @@ public partial class BankingAppService : ApplicationService, IBankingAppService
         RowLockHelper rowLock,
         IdempotencyGate idem,
         IHttpContextAccessor http,
-        IAbpDistributedLock distributedLock)
+        IAbpDistributedLock distributedLock,
+        IRepository<LedgerEntry, Guid> ledgerEntryRepository,
+        IBankingCacheManager bankingCacheManager,
+        IDistributedEventBus distributedEventBus)
     {
         _customers = customers;
         _accounts = accounts;
@@ -46,7 +54,9 @@ public partial class BankingAppService : ApplicationService, IBankingAppService
         _rowLock = rowLock;
         _idem = idem;
         _http = http;
-
         _distributedLock = distributedLock;
+        _ledgerEntryRepository = ledgerEntryRepository;
+        _bankingCacheManager = bankingCacheManager;
+        _distributedEventBus = distributedEventBus;
     }
 }

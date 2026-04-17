@@ -4,6 +4,7 @@ using Volo.Abp.Uow;
 using Volo.Abp.AuditLogging.EntityFrameworkCore;
 using Volo.Abp.BackgroundJobs.EntityFrameworkCore;
 using Volo.Abp.EntityFrameworkCore;
+using Volo.Abp.EntityFrameworkCore.DistributedEvents;
 using Volo.Abp.FeatureManagement.EntityFrameworkCore;
 using Volo.Abp.Identity.EntityFrameworkCore;
 using Volo.Abp.Modularity;
@@ -13,6 +14,9 @@ using Volo.Abp.SettingManagement.EntityFrameworkCore;
 using Volo.Abp.TenantManagement.EntityFrameworkCore;
 using Volo.Abp.EntityFrameworkCore.PostgreSql;
 using Volo.Abp.Timing;
+using BankApiAbp.Banking;
+using Volo.Abp.Domain.Repositories.EntityFrameworkCore;
+using Volo.Abp.EventBus.Distributed;
 
 namespace BankApiAbp.EntityFrameworkCore;
 
@@ -27,7 +31,7 @@ namespace BankApiAbp.EntityFrameworkCore;
     typeof(AbpAuditLoggingEntityFrameworkCoreModule),
     typeof(AbpTenantManagementEntityFrameworkCoreModule),
     typeof(AbpFeatureManagementEntityFrameworkCoreModule)
-    )]
+)]
 public class BankApiAbpEntityFrameworkCoreModule : AbpModule
 {
     public override void PreConfigureServices(ServiceConfigurationContext context)
@@ -39,22 +43,33 @@ public class BankApiAbpEntityFrameworkCoreModule : AbpModule
     {
         context.Services.AddAbpDbContext<BankApiAbpDbContext>(options =>
         {
-                /* Remove "includeAllEntities: true" to create
-                 * default repositories only for aggregate roots */
             options.AddDefaultRepositories(includeAllEntities: true);
+            options.AddRepository<BankingIdempotencyRecord, EfCoreRepository<BankApiAbpDbContext, BankingIdempotencyRecord, Guid>>();
         });
 
         Configure<AbpDbContextOptions>(options =>
         {
-                /* The main point to change your DBMS.
-                 * See also BankApiAbpMigrationsDbContextFactory for EF Core tooling. */
             options.UseNpgsql();
         });
+
         Configure<AbpClockOptions>(options =>
         {
             options.Kind = DateTimeKind.Utc;
         });
 
+        Configure<AbpDistributedEventBusOptions>(options =>
+        {
+            options.Inboxes.Configure(config =>
+            {
+                config.UseDbContext<BankApiAbpDbContext>();
+                config.DatabaseName = "BankApiAbp";
+            });
 
+            options.Outboxes.Configure(config =>
+            {
+                config.UseDbContext<BankApiAbpDbContext>();
+                config.DatabaseName = "BankApiAbp";
+            });
+        });
     }
 }

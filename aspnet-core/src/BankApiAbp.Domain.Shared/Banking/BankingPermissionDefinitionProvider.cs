@@ -21,6 +21,7 @@ public class BankingPermissionDefinitionProvider : PermissionDefinitionProvider
         AddChildIfNotExists(group, accounts, BankingPermissions.Accounts.Read, L("Permission:Read"));
         AddChildIfNotExists(group, accounts, BankingPermissions.Accounts.List, L("Permission:List"));
         AddChildIfNotExists(group, accounts, BankingPermissions.Accounts.Deposit, L("Permission:Deposit"));
+        AddChildIfNotExists(group, accounts, BankingPermissions.Accounts.Transfer, L("Permission:Transfer"));
         AddChildIfNotExists(group, accounts, BankingPermissions.Accounts.Withdraw, L("Permission:Withdraw"));
         AddChildIfNotExists(group, accounts, BankingPermissions.Accounts.Statement, L("Permission:Statement"));
         AddChildIfNotExists(group, accounts, BankingPermissions.Accounts.Summary, L("Permission:Summary"));

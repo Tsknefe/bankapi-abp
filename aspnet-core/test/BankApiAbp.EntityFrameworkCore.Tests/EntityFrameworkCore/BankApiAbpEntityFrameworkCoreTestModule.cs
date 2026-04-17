@@ -18,7 +18,7 @@ namespace BankApiAbp.EntityFrameworkCore;
     typeof(BankApiAbpApplicationTestModule),
     typeof(BankApiAbpEntityFrameworkCoreModule),
     typeof(AbpEntityFrameworkCoreSqliteModule)
-    )]
+)]
 public class BankApiAbpEntityFrameworkCoreTestModule : AbpModule
 {
     private SqliteConnection? _sqliteConnection;
@@ -30,16 +30,19 @@ public class BankApiAbpEntityFrameworkCoreTestModule : AbpModule
             options.SaveStaticFeaturesToDatabase = false;
             options.IsDynamicFeatureStoreEnabled = false;
         });
+
         Configure<PermissionManagementOptions>(options =>
         {
             options.SaveStaticPermissionsToDatabase = false;
             options.IsDynamicPermissionStoreEnabled = false;
         });
+
         Configure<SettingManagementOptions>(options =>
         {
             options.SaveStaticSettingsToDatabase = false;
             options.IsDynamicSettingStoreEnabled = false;
         });
+
         context.Services.AddAlwaysDisableUnitOfWorkTransaction();
 
         ConfigureInMemorySqlite(context.Services);
@@ -72,10 +75,8 @@ public class BankApiAbpEntityFrameworkCoreTestModule : AbpModule
             .UseSqlite(connection)
             .Options;
 
-        using (var context = new BankApiAbpDbContext(options))
-        {
-            context.GetService<IRelationalDatabaseCreator>().CreateTables();
-        }
+        using var context = new BankApiAbpDbContext(options);
+        context.GetService<IRelationalDatabaseCreator>().CreateTables();
 
         return connection;
     }
