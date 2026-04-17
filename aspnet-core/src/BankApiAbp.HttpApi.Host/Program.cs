@@ -2,6 +2,7 @@
 using System.Security.Claims;
 using System.Threading.RateLimiting;
 using System.Threading.Tasks;
+using BankApiAbp.Banking;
 using BankApiAbp.Banking.Messaging;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics;
@@ -27,18 +28,7 @@ public class Program
     {
         AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
 
-        Log.Logger = new LoggerConfiguration()
-#if DEBUG
-            .MinimumLevel.Debug()
-#else
-            .MinimumLevel.Information()
-#endif
-            .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
-            .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
-            .Enrich.FromLogContext()
-            .WriteTo.Async(c => c.File("Logs/logs.txt"))
-            .WriteTo.Async(c => c.Console())
-            .CreateLogger();
+        Log.Logger = CreateBootstrapLogger();
 
         try
         {
@@ -49,32 +39,7 @@ public class Program
             builder.Host.UseAutofac();
             builder.Host.UseSerilog();
 
-            var elasticUri =
-                builder.Configuration["Elastic:Uri"] ??
-                builder.Configuration["ElasticConfiguration:Uri"];
-
-            if (!string.IsNullOrWhiteSpace(elasticUri))
-            {
-                Log.Logger = new LoggerConfiguration()
-#if DEBUG
-                    .MinimumLevel.Debug()
-#else
-                    .MinimumLevel.Information()
-#endif
-                    .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
-                    .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
-                    .Enrich.FromLogContext()
-                    .WriteTo.Async(c => c.File("Logs/logs.txt"))
-                    .WriteTo.Async(c => c.Console())
-                    .WriteTo.Async(c => c.Elasticsearch(new ElasticsearchSinkOptions(new Uri(elasticUri))
-                    {
-                        AutoRegisterTemplate = true,
-                        IndexFormat = "bankapiabp-logs-{0:yyyy.MM}"
-                    }))
-                    .CreateLogger();
-
-                builder.Host.UseSerilog();
-            }
+            ConfigureSerilogWithOptionalElastic(builder);
 
             var environmentName = builder.Environment.EnvironmentName;
             var contentRoot = builder.Environment.ContentRootPath;
@@ -105,8 +70,11 @@ public class Program
                 }
                 else
                 {
-                    var globalPermit = builder.Configuration.GetValue<int?>("RateLimiting:Global:PermitLimit") ?? 100;
-                    var globalWindowSeconds = builder.Configuration.GetValue<int?>("RateLimiting:Global:WindowSeconds") ?? 60;
+                    var globalPermit =
+                        builder.Configuration.GetValue<int?>("RateLimiting:Global:PermitLimit") ?? 100;
+
+                    var globalWindowSeconds =
+                        builder.Configuration.GetValue<int?>("RateLimiting:Global:WindowSeconds") ?? 60;
 
                     var transferTokenLimit =
                         builder.Configuration.GetValue<int?>("RateLimiting:TransferPolicy:TokenLimit")
@@ -173,7 +141,8 @@ public class Program
                 });
             }
 
-            builder.Services.AddOpenTelemetry()
+            builder.Services
+                .AddOpenTelemetry()
                 .ConfigureResource(resource =>
                 {
                     resource.AddService("BankApiAbp.HttpApi.Host");
@@ -182,9 +151,14 @@ public class Program
                 {
                     tracing
                         .AddSource(InboxTracing.ActivitySourceName)
+                        .AddSource(BankingAppService.ActivitySourceName)
                         .AddAspNetCoreInstrumentation()
                         .AddHttpClientInstrumentation()
-                        .AddEntityFrameworkCoreInstrumentation()
+                        .AddEntityFrameworkCoreInstrumentation(options =>
+                        {
+                            options.SetDbStatementForText = true;
+                            options.SetDbStatementForStoredProcedure = true;
+                        })
                         .AddOtlpExporter(options =>
                         {
                             options.Endpoint = new Uri(otlpEndpoint);
@@ -198,6 +172,8 @@ public class Program
                         .AddHttpClientInstrumentation()
                         .AddRuntimeInstrumentation()
                         .AddMeter(InboxMetrics.MeterName)
+                        .AddMeter(BankingAppService.MeterName)
+                        .AddPrometheusExporter()
                         .AddOtlpExporter(options =>
                         {
                             options.Endpoint = new Uri(otlpEndpoint);
@@ -208,6 +184,8 @@ public class Program
             await builder.AddApplicationAsync<BankApiAbpHttpApiHostModule>();
 
             var app = builder.Build();
+
+            app.UseOpenTelemetryPrometheusScrapingEndpoint();
 
             if (app.Environment.IsEnvironment("Test") ||
                 app.Environment.IsEnvironment("RateLimitTest"))
@@ -225,6 +203,34 @@ public class Program
                 });
             }
 
+            app.UseExceptionHandler(errorApp =>
+            {
+                errorApp.Run(async context =>
+                {
+                    var exceptionFeature = context.Features.Get<IExceptionHandlerFeature>();
+                    var exception = exceptionFeature?.Error;
+
+                    if (exception != null)
+                    {
+                        Log.Error(exception, "Unhandled exception caught by global exception handler.");
+                    }
+
+                    if (!context.Response.HasStarted)
+                    {
+                        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                        context.Response.ContentType = "application/json";
+
+                        await context.Response.WriteAsync("""
+                        {
+                          "error": {
+                            "message": "Beklenmeyen bir sunucu hatası oluştu."
+                          }
+                        }
+                        """);
+                    }
+                });
+            });
+
             await app.InitializeApplicationAsync();
             await app.RunAsync();
 
@@ -239,5 +245,51 @@ public class Program
         {
             Log.CloseAndFlush();
         }
+    }
+
+    private static ILogger CreateBootstrapLogger()
+    {
+        return new LoggerConfiguration()
+#if DEBUG
+            .MinimumLevel.Debug()
+#else
+            .MinimumLevel.Information()
+#endif
+            .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
+            .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
+            .Enrich.FromLogContext()
+            .WriteTo.Async(c => c.File("Logs/logs.txt"))
+            .WriteTo.Async(c => c.Console())
+            .CreateLogger();
+    }
+
+    private static void ConfigureSerilogWithOptionalElastic(WebApplicationBuilder builder)
+    {
+        var elasticUri =
+            builder.Configuration["Elastic:Uri"] ??
+            builder.Configuration["ElasticConfiguration:Uri"];
+
+        if (string.IsNullOrWhiteSpace(elasticUri))
+            return;
+
+        Log.Logger = new LoggerConfiguration()
+#if DEBUG
+            .MinimumLevel.Debug()
+#else
+            .MinimumLevel.Information()
+#endif
+            .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
+            .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
+            .Enrich.FromLogContext()
+            .WriteTo.Async(c => c.File("Logs/logs.txt"))
+            .WriteTo.Async(c => c.Console())
+            .WriteTo.Async(c => c.Elasticsearch(new ElasticsearchSinkOptions(new Uri(elasticUri))
+            {
+                AutoRegisterTemplate = true,
+                IndexFormat = "bankapiabp-logs-{0:yyyy.MM}"
+            }))
+            .CreateLogger();
+
+        builder.Host.UseSerilog();
     }
 }
