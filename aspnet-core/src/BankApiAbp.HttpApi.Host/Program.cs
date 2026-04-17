@@ -172,6 +172,8 @@ public class Program
                         .AddHttpClientInstrumentation()
                         .AddRuntimeInstrumentation()
                         .AddMeter(InboxMetrics.MeterName)
+                        .AddMeter(BankingAppService.MeterName)
+                        .AddPrometheusExporter()
                         .AddOtlpExporter(options =>
                         {
                             options.Endpoint = new Uri(otlpEndpoint);
@@ -182,6 +184,8 @@ public class Program
             await builder.AddApplicationAsync<BankApiAbpHttpApiHostModule>();
 
             var app = builder.Build();
+
+            app.UseOpenTelemetryPrometheusScrapingEndpoint();
 
             if (app.Environment.IsEnvironment("Test") ||
                 app.Environment.IsEnvironment("RateLimitTest"))

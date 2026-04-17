@@ -45,6 +45,7 @@ using Volo.Abp.Swashbuckle;
 using Volo.Abp.UI.Navigation.Urls;
 using Volo.Abp.VirtualFileSystem;
 using BankApiAbp.Banking.Messaging;
+using BankApiAbp.Banking.Infrastructure;
 
 namespace BankApiAbp;
 
@@ -97,7 +98,9 @@ public class BankApiAbpHttpApiHostModule : AbpModule
         ConfigureSwaggerServices(context, configuration);
         ConfigureRedis(context, configuration);
 
+
         context.Services.AddHostedService<InboxProcessorWorker>();
+        context.Services.AddSingleton<TestFaultInjection>();
 
         Configure<OpenIddictServerBuilder>(builder =>
         {
