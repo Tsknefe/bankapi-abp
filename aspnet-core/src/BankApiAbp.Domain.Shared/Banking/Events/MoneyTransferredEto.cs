@@ -12,4 +12,7 @@ public class MoneyTransferredEto
 
     public string? IdempotencyKey { get; set; }
     public Guid UserId { get; set; }
+
+    public string? TraceParent { get; set; }
+    public string? TraceState { get; set; }
 }

@@ -28,6 +28,7 @@ public partial class BankingAppService : ApplicationService, IBankingAppService
     private readonly IRepository<LedgerEntry, Guid> _ledgerEntryRepository;
     private readonly IBankingCacheManager _bankingCacheManager;
     private readonly IDistributedEventBus _distributedEventBus;
+    private readonly TestFaultInjection _testFaultInjection;
 
     public BankingAppService(
         IRepository<Customer, Guid> customers,
@@ -42,7 +43,8 @@ public partial class BankingAppService : ApplicationService, IBankingAppService
         IAbpDistributedLock distributedLock,
         IRepository<LedgerEntry, Guid> ledgerEntryRepository,
         IBankingCacheManager bankingCacheManager,
-        IDistributedEventBus distributedEventBus)
+        IDistributedEventBus distributedEventBus,
+        TestFaultInjection testFaultInjection)
     {
         _customers = customers;
         _accounts = accounts;
@@ -58,5 +60,6 @@ public partial class BankingAppService : ApplicationService, IBankingAppService
         _ledgerEntryRepository = ledgerEntryRepository;
         _bankingCacheManager = bankingCacheManager;
         _distributedEventBus = distributedEventBus;
+        _testFaultInjection = testFaultInjection;
     }
 }

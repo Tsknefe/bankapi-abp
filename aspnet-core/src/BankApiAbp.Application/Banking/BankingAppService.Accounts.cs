@@ -1,8 +1,10 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using BankApiAbp.Banking.Dtos;
+using BankApiAbp.Banking.Infrastructure;
 using BankApiAbp.Entities;
 using BankApiAbp.Permissions;
 using BankApiAbp.Transactions;
@@ -55,6 +57,9 @@ public partial class BankingAppService
     [Authorize(BankingPermissions.Accounts.Deposit)]
     public async Task<DepositResultDto> DepositAsync(DepositDto input)
     {
+        var startedAt = Stopwatch.GetTimestamp();
+        DepositRequestCounter.Add(1);
+
         using var activity = ActivitySource.StartActivity("Banking.Deposit");
         activity?.SetTag("account.id", input.AccountId.ToString());
         activity?.SetTag("amount", input.Amount);
@@ -76,6 +81,9 @@ public partial class BankingAppService
         {
             if (!string.Equals(record.RequestHash, requestHash, StringComparison.Ordinal))
             {
+                DepositFailureCounter.Add(1);
+                DepositDurationMs.Record(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
+
                 throw new BusinessException("IDEMPOTENCY_KEY_REUSE_WITH_DIFFERENT_PAYLOAD")
                     .WithData("message", "Aynı Idempotency-Key farklı istek gövdesi ile kullanılamaz.");
             }
@@ -84,8 +92,15 @@ public partial class BankingAppService
             {
                 var cached = JsonSerializer.Deserialize<DepositResultDto>(record.ResponseJson);
                 if (cached != null)
+                {
+                    DepositSuccessCounter.Add(1);
+                    DepositDurationMs.Record(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
                     return cached;
+                }
             }
+
+            DepositFailureCounter.Add(1);
+            DepositDurationMs.Record(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
 
             await _idem.GetOrThrowDuplicateResponseAsync(record);
             throw new BusinessException("IDEMPOTENCY_UNKNOWN_STATE");
@@ -169,12 +184,19 @@ public partial class BankingAppService
             };
 
             await _idem.CompleteAsync(record, result, 200);
+
+            DepositSuccessCounter.Add(1);
+            DepositDurationMs.Record(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
+
             return result;
         }
         catch (Exception ex)
         {
             activity?.SetTag("error", true);
             activity?.SetTag("exception", ex.Message);
+
+            DepositFailureCounter.Add(1);
+            DepositDurationMs.Record(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
 
             await _idem.FailAsync(record, ex);
             throw;
@@ -184,6 +206,9 @@ public partial class BankingAppService
     [Authorize(BankingPermissions.Accounts.Withdraw)]
     public async Task<WithdrawResultDto> WithdrawAsync(WithdrawDto input)
     {
+        var startedAt = Stopwatch.GetTimestamp();
+        WithdrawRequestCounter.Add(1);
+
         using var activity = ActivitySource.StartActivity("Banking.Withdraw");
         activity?.SetTag("account.id", input.AccountId.ToString());
         activity?.SetTag("amount", input.Amount);
@@ -205,6 +230,9 @@ public partial class BankingAppService
         {
             if (!string.Equals(record.RequestHash, requestHash, StringComparison.Ordinal))
             {
+                WithdrawFailureCounter.Add(1);
+                WithdrawDurationMs.Record(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
+
                 throw new BusinessException("IDEMPOTENCY_KEY_REUSE_WITH_DIFFERENT_PAYLOAD")
                     .WithData("message", "Aynı Idempotency-Key farklı istek gövdesi ile kullanılamaz.");
             }
@@ -213,8 +241,15 @@ public partial class BankingAppService
             {
                 var cached = JsonSerializer.Deserialize<WithdrawResultDto>(record.ResponseJson);
                 if (cached != null)
+                {
+                    WithdrawSuccessCounter.Add(1);
+                    WithdrawDurationMs.Record(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
                     return cached;
+                }
             }
+
+            WithdrawFailureCounter.Add(1);
+            WithdrawDurationMs.Record(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
 
             await _idem.GetOrThrowDuplicateResponseAsync(record);
             throw new BusinessException("IDEMPOTENCY_UNKNOWN_STATE");
@@ -248,6 +283,14 @@ public partial class BankingAppService
                 await EnsureAccountOwnedAsync(account.Id, ct);
 
                 dbSpan?.SetTag("balance.before", account.Balance);
+
+                if (account.Balance < input.Amount)
+                {
+                    throw new BusinessException("INSUFFICIENT_BALANCE")
+                        .WithData("AccountId", account.Id)
+                        .WithData("Balance", account.Balance)
+                        .WithData("RequestedAmount", input.Amount);
+                }
 
                 account.Withdraw(input.Amount);
                 await _accounts.UpdateAsync(account, autoSave: true);
@@ -298,12 +341,19 @@ public partial class BankingAppService
             };
 
             await _idem.CompleteAsync(record, result, 200);
+
+            WithdrawSuccessCounter.Add(1);
+            WithdrawDurationMs.Record(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
+
             return result;
         }
         catch (Exception ex)
         {
             activity?.SetTag("error", true);
             activity?.SetTag("exception", ex.Message);
+
+            WithdrawFailureCounter.Add(1);
+            WithdrawDurationMs.Record(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
 
             await _idem.FailAsync(record, ex);
             throw;
@@ -510,6 +560,9 @@ public partial class BankingAppService
     [Authorize(BankingPermissions.Accounts.Transfer)]
     public async Task<TransferResultDto> TransferAsync(TransferDto input)
     {
+        var startedAt = Stopwatch.GetTimestamp();
+        TransferRequestCounter.Add(1);
+
         using var activity = ActivitySource.StartActivity("Banking.Transfer");
         activity?.SetTag("from.account", input.FromAccountId.ToString());
         activity?.SetTag("to.account", input.ToAccountId.ToString());
@@ -520,7 +573,11 @@ public partial class BankingAppService
         var key = GetIdempotencyKeyOrThrow(operation);
 
         if (input.FromAccountId == input.ToAccountId)
+        {
+            TransferFailureCounter.Add(1);
+            TransferDurationMs.Record(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
             throw new BusinessException("TRANSFER_SAME_ACCOUNT");
+        }
 
         var requestHash = BuildRequestHash(
             input.FromAccountId,
@@ -541,6 +598,8 @@ public partial class BankingAppService
         {
             if (!string.Equals(record.RequestHash, requestHash, StringComparison.Ordinal))
             {
+                TransferFailureCounter.Add(1);
+                TransferDurationMs.Record(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
                 throw new BusinessException("IDEMPOTENCY_KEY_REUSE_WITH_DIFFERENT_PAYLOAD");
             }
 
@@ -548,8 +607,15 @@ public partial class BankingAppService
             {
                 var cached = JsonSerializer.Deserialize<TransferResultDto>(record.ResponseJson);
                 if (cached != null)
+                {
+                    TransferSuccessCounter.Add(1);
+                    TransferDurationMs.Record(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
                     return cached;
+                }
             }
+
+            TransferFailureCounter.Add(1);
+            TransferDurationMs.Record(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
 
             await _idem.GetOrThrowDuplicateResponseAsync(record);
             throw new BusinessException("IDEMPOTENCY_UNKNOWN_STATE");
@@ -574,6 +640,7 @@ public partial class BankingAppService
 
             if (lock1 == null)
             {
+                TransferLockFailureCounter.Add(1);
                 lockSpan?.SetTag("lock.first", false);
                 throw new UserFriendlyException("Hesap kilitlenemedi");
             }
@@ -587,6 +654,7 @@ public partial class BankingAppService
 
             if (lock2 == null)
             {
+                TransferLockFailureCounter.Add(1);
                 lockSpan?.SetTag("lock.second", false);
                 throw new UserFriendlyException("Hesap kilitlenemedi");
             }
@@ -602,6 +670,9 @@ public partial class BankingAppService
 
             await _retry.ExecuteAsync(async ct =>
             {
+                if (_testFaultInjection.ShouldThrowTransientFailure())
+                    throw new SimulatedTransientException();
+
                 var firstAcc = await _rowLock.LockAccountForUpdateAsync(first, ct);
                 var secondAcc = await _rowLock.LockAccountForUpdateAsync(second, ct);
 
@@ -658,6 +729,8 @@ public partial class BankingAppService
 
             using (var eventSpan = ActivitySource.StartActivity("Banking.Transfer.PublishEvent"))
             {
+                var current = Activity.Current;
+
                 await _distributedEventBus.PublishAsync(
                     new MoneyTransferredEto
                     {
@@ -669,10 +742,13 @@ public partial class BankingAppService
                         Description = input.Description,
                         OccurredAtUtc = Clock.Now,
                         IdempotencyKey = key,
-                        UserId = userId
+                        UserId = userId,
+                        TraceParent = current?.Id,
+                        TraceState = current?.TraceStateString
                     }
                 );
 
+                TransferPublishedEventCounter.Add(1);
                 eventSpan?.SetTag("event.published", true);
                 eventSpan?.SetTag("transfer.id", txOutId.ToString());
             }
@@ -701,12 +777,19 @@ public partial class BankingAppService
             };
 
             await _idem.CompleteAsync(record, result, 200);
+
+            TransferSuccessCounter.Add(1);
+            TransferDurationMs.Record(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
+
             return result;
         }
         catch (Exception ex)
         {
             activity?.SetTag("error", true);
             activity?.SetTag("exception", ex.Message);
+
+            TransferFailureCounter.Add(1);
+            TransferDurationMs.Record(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
 
             await _idem.FailAsync(record, ex);
             throw;

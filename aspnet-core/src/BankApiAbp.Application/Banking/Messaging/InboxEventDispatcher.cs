@@ -2,8 +2,6 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Threading.Tasks;
-using BankApiAbp.Banking.Handlers;
-using BankApiAbp.Banking.Messaging.Handlers;
 using Volo.Abp;
 using Volo.Abp.DependencyInjection;
 using Volo.Abp.Domain.Repositories;
@@ -13,17 +11,14 @@ namespace BankApiAbp.Banking.Messaging;
 public class InboxEventDispatcher : IInboxEventDispatcher, ITransientDependency
 {
     private readonly IRepository<InboxMessage, Guid> _inboxRepository;
-    private readonly TransferAuditLogHandler _auditHandler;
-    private readonly TransferNotificationHandler _notificationHandler;
+    private readonly ITransferEventSideEffectService _sideEffects;
 
     public InboxEventDispatcher(
         IRepository<InboxMessage, Guid> inboxRepository,
-        TransferAuditLogHandler auditHandler,
-        TransferNotificationHandler notificationHandler)
+        ITransferEventSideEffectService sideEffects)
     {
         _inboxRepository = inboxRepository;
-        _auditHandler = auditHandler;
-        _notificationHandler = notificationHandler;
+        _sideEffects = sideEffects;
     }
 
     public async Task DispatchAsync(Guid inboxMessageId)
@@ -34,49 +29,52 @@ public class InboxEventDispatcher : IInboxEventDispatcher, ITransientDependency
 
         var inboxMessage = await _inboxRepository.GetAsync(inboxMessageId);
 
-        activity?.SetTag("inbox.event.id", inboxMessage.EventId);
+        activity?.SetTag("inbox.event.id", inboxMessage.EventId.ToString());
         activity?.SetTag("inbox.event.name", inboxMessage.EventName);
         activity?.SetTag("inbox.consumer.name", inboxMessage.ConsumerName);
         activity?.SetTag("inbox.retry.count", inboxMessage.RetryCount);
-        activity?.SetTag("inbox.status", inboxMessage.Status.ToString());
+        activity?.SetTag("inbox.status", inboxMessage.Status);
 
         if (string.IsNullOrWhiteSpace(inboxMessage.PayloadJson))
         {
-            activity?.SetStatus(ActivityStatusCode.Error, "Inbox message payload is empty.");
-            throw new BusinessException(message: "Inbox message payload is empty.");
+            activity?.SetStatus(ActivityStatusCode.Error, "Payload is empty.");
+            throw new BusinessException("INBOX_PAYLOAD_EMPTY");
         }
 
         if (inboxMessage.EventName != nameof(MoneyTransferredEto))
         {
             activity?.SetStatus(ActivityStatusCode.Error, $"Unsupported event type: {inboxMessage.EventName}");
-            throw new BusinessException(message: $"Unsupported event type: {inboxMessage.EventName}");
+            throw new BusinessException("INBOX_UNSUPPORTED_EVENT")
+                .WithData("EventName", inboxMessage.EventName);
         }
 
         var eventData = JsonSerializer.Deserialize<MoneyTransferredEto>(inboxMessage.PayloadJson);
 
         if (eventData == null)
         {
-            activity?.SetStatus(ActivityStatusCode.Error, "Inbox message payload could not be deserialized.");
-            throw new BusinessException(message: "Inbox message payload could not be deserialized.");
+            activity?.SetStatus(ActivityStatusCode.Error, "Payload deserialize failed.");
+            throw new BusinessException("INBOX_PAYLOAD_DESERIALIZE_FAILED");
         }
 
-        if (inboxMessage.ConsumerName == nameof(TransferAuditLogHandler))
+        if (inboxMessage.ConsumerName == nameof(Handlers.TransferAuditLogHandler))
         {
-            activity?.SetTag("inbox.dispatch.target", nameof(TransferAuditLogHandler));
-            await _auditHandler.HandleEventAsync(eventData);
+            activity?.SetTag("inbox.dispatch.target", nameof(Handlers.TransferAuditLogHandler));
+            await _sideEffects.WriteAuditLogAsync(eventData);
             activity?.SetTag("inbox.dispatch.result", "success");
             return;
         }
 
-        if (inboxMessage.ConsumerName == nameof(TransferNotificationHandler))
+        if (inboxMessage.ConsumerName == nameof(BankApiAbp.Banking.Handlers.TransferNotificationHandler))
         {
-            activity?.SetTag("inbox.dispatch.target", nameof(TransferNotificationHandler));
-            await _notificationHandler.HandleEventAsync(eventData);
+            activity?.SetTag("inbox.dispatch.target", nameof(BankApiAbp.Banking.Handlers.TransferNotificationHandler));
+            await _sideEffects.WriteNotificationLogAsync(eventData);
             activity?.SetTag("inbox.dispatch.result", "success");
             return;
         }
 
         activity?.SetStatus(ActivityStatusCode.Error, $"Unsupported consumer: {inboxMessage.ConsumerName}");
-        throw new BusinessException(message: $"Unsupported consumer: {inboxMessage.ConsumerName}");
+
+        throw new BusinessException("INBOX_UNSUPPORTED_CONSUMER")
+            .WithData("ConsumerName", inboxMessage.ConsumerName);
     }
 }

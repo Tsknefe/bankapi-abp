@@ -12,7 +12,7 @@ public class TransferTests
     private static readonly Guid AccountB = TestUsers.BasicAccountB;
 
     [Fact]
-    public async Task Transfer_Should_Move_Money_From_A_To_B()
+    public async Task Transfer_Should_Move_Exact_Money_From_A_To_B()
     {
         using var client = TestClientFactory.CreateClient();
 
@@ -24,11 +24,13 @@ public class TransferTests
         var beforeA = await GetBalance(client, AccountA);
         var beforeB = await GetBalance(client, AccountB);
 
+        var amount = 1m;
+
         var payload = new
         {
             fromAccountId = AccountA,
             toAccountId = AccountB,
-            amount = 1m,
+            amount,
             description = "test transfer"
         };
 
@@ -46,8 +48,8 @@ public class TransferTests
         var afterA = await GetBalance(client, AccountA);
         var afterB = await GetBalance(client, AccountB);
 
-        afterA.Should().BeLessThan(beforeA);
-        afterB.Should().BeGreaterThan(beforeB);
+        afterA.Should().Be(beforeA - amount);
+        afterB.Should().Be(beforeB + amount);
     }
 
     private static async Task<decimal> GetBalance(HttpClient client, Guid accountId)
