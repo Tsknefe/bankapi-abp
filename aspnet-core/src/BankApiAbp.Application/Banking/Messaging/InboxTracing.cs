@@ -4,7 +4,7 @@ namespace BankApiAbp.Banking.Messaging;
 
 public static class InboxTracing
 {
-    public const string ActivitySourceName = "BankApiAbp.Banking.Inbox";
+    public const string ActivitySourceName = "InboxTracing";
 
     public static readonly ActivitySource ActivitySource = new(ActivitySourceName);
 }

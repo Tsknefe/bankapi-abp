@@ -71,7 +71,7 @@ public class BankingPermissionDataSeedContributor : IDataSeedContributor, ITrans
 
         await _permissionDataSeeder.SeedAsync(
             providerName: RolePermissionValueProvider.ProviderName,
-            providerKey: adminRole.Id.ToString(),
+            providerKey: adminRole.Name!,
             grantedPermissions: permissions);
     }
 }

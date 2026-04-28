@@ -12,7 +12,7 @@ public class RetryExecutor : ITransientDependency
 {
     private const string DeadlockDetected = "40P01";
     private const string SerializationFailure = "40001";
-    private const string LockNotAvailable = "55P03"; 
+    private const string LockNotAvailable = "55P03";
 
     public async Task<T> ExecuteAsync<T>(
         Func<CancellationToken, Task<T>> action,
@@ -65,6 +65,8 @@ public class RetryExecutor : ITransientDependency
 
     private static bool IsRetryable(Exception ex)
     {
+        if (ex is SimulatedTransientException) return true;
+
         if (ex is DbUpdateConcurrencyException) return true;
 
         if (ex is DbUpdateException dbu && dbu.InnerException is PostgresException pg1)
