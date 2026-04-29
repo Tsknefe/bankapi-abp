@@ -7,7 +7,7 @@ using Volo.Abp.Modularity;
 using Volo.Abp.PermissionManagement;
 using Volo.Abp.SettingManagement;
 using Volo.Abp.TenantManagement;
-
+using BankApiAbp.Banking.Risk;
 namespace BankApiAbp;
 
 [DependsOn(
@@ -30,5 +30,11 @@ public class BankApiAbpApplicationModule : AbpModule
         {
             options.AddMaps<BankApiAbpApplicationModule>();
         });
+
+        context.Services.AddTransient<IRiskRule, AmountRiskRule>();
+        context.Services.AddTransient<IRiskRule, NightRiskRule>();
+        context.Services.AddTransient<IRiskRule, VelocityRiskRule>();
+
+        context.Services.AddTransient<ITransactionRiskEngine, TransactionRiskEngine>();
     }
 }
