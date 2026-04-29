@@ -572,12 +572,6 @@ public partial class BankingAppService
         var operation = "accounts.transfer";
         var key = GetIdempotencyKeyOrThrow(operation);
 
-        if (input.FromAccountId == input.ToAccountId)
-        {
-            TransferFailureCounter.Add(1);
-            TransferDurationMs.Record(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
-            throw new BusinessException("TRANSFER_SAME_ACCOUNT");
-        }
 
         var requestHash = BuildRequestHash(
             input.FromAccountId,
@@ -619,6 +613,28 @@ public partial class BankingAppService
 
             await _idem.GetOrThrowDuplicateResponseAsync(record);
             throw new BusinessException("IDEMPOTENCY_UNKNOWN_STATE");
+        }
+
+        var risk = await _riskEngine.EvaluateTransferAsync(userId, input);
+
+        activity?.SetTag("risk.decision", risk.Decision.ToString());
+        activity?.SetTag("risk.code", risk.Code);
+        activity?.SetTag("risk.score", risk.Score);
+
+        if (risk.Decision == Risk.RiskDecision.Block)
+        {
+            TransferFailureCounter.Add(1);
+            TransferDurationMs.Record(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
+
+            await _idem.FailAsync(record, new BusinessException(risk.Code));
+
+            throw new BusinessException(risk.Code)
+                .WithData("message", risk.Message);
+        }
+
+        if (risk.Decision == Risk.RiskDecision.Flag)
+        {
+            activity?.SetTag("risk.flagged", true);
         }
 
         try
