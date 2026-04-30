@@ -7,6 +7,9 @@ using Volo.Abp.Domain.Repositories;
 using BankApiAbp.Banking.Infrastructure;
 using Microsoft.AspNetCore.Http;
 using Volo.Abp.DistributedLocking;
+using BankApiAbp.Banking.Caching;
+using Volo.Abp.EventBus.Distributed;
+using BankApiAbp.Banking.Risk;
 
 namespace BankApiAbp.Banking;
 
@@ -23,6 +26,11 @@ public partial class BankingAppService : ApplicationService, IBankingAppService
     private readonly IdempotencyGate _idem;
     private readonly IHttpContextAccessor _http;
     private readonly IAbpDistributedLock _distributedLock;
+    private readonly IRepository<LedgerEntry, Guid> _ledgerEntryRepository;
+    private readonly IBankingCacheManager _bankingCacheManager;
+    private readonly IDistributedEventBus _distributedEventBus;
+    private readonly TestFaultInjection _testFaultInjection;
+    private readonly ITransactionRiskEngine _riskEngine;
 
     public BankingAppService(
         IRepository<Customer, Guid> customers,
@@ -34,7 +42,12 @@ public partial class BankingAppService : ApplicationService, IBankingAppService
         RowLockHelper rowLock,
         IdempotencyGate idem,
         IHttpContextAccessor http,
-        IAbpDistributedLock distributedLock)
+        IAbpDistributedLock distributedLock,
+        IRepository<LedgerEntry, Guid> ledgerEntryRepository,
+        IBankingCacheManager bankingCacheManager,
+        IDistributedEventBus distributedEventBus,
+        TestFaultInjection testFaultInjection,
+        ITransactionRiskEngine riskEngine)
     {
         _customers = customers;
         _accounts = accounts;
@@ -46,7 +59,11 @@ public partial class BankingAppService : ApplicationService, IBankingAppService
         _rowLock = rowLock;
         _idem = idem;
         _http = http;
-
         _distributedLock = distributedLock;
+        _ledgerEntryRepository = ledgerEntryRepository;
+        _bankingCacheManager = bankingCacheManager;
+        _distributedEventBus = distributedEventBus;
+        _testFaultInjection = testFaultInjection;
+        _riskEngine = riskEngine; 
     }
 }

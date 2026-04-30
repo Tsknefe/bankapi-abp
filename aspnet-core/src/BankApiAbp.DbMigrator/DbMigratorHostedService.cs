@@ -53,6 +53,15 @@ public class DbMigratorHostedService : IHostedService
                 .GetRequiredService<OpenIddictSwaggerClientSeeder>()
                 .SeedAsync();
 
+            await application
+                .ServiceProvider
+                .GetRequiredService<TestUserPasswordSeeder>()
+                .SeedAsync();
+
+            await application
+    .ServiceProvider
+    .GetRequiredService<DemoBankingDataSeeder>()
+    .SeedAsync();
 
             await application.ShutdownAsync();
 

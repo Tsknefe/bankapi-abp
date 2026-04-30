@@ -1,11 +1,9 @@
-﻿using System;
-using System.Linq;
-using System.Threading.Tasks;
+﻿using System.Threading.Tasks;
+using Volo.Abp.Authorization.Permissions;
 using Volo.Abp.Data;
 using Volo.Abp.DependencyInjection;
-using Volo.Abp.PermissionManagement;
 using Volo.Abp.Identity;
-using Volo.Abp.Authorization.Permissions;
+using Volo.Abp.PermissionManagement;
 
 namespace BankApiAbp.Banking;
 
@@ -30,6 +28,7 @@ public class BankingPermissionDataSeedContributor : IDataSeedContributor, ITrans
 
         if (adminRole == null)
             return;
+
         var permissions = new[]
         {
             BankingPermissions.Customers.Default,
@@ -42,6 +41,7 @@ public class BankingPermissionDataSeedContributor : IDataSeedContributor, ITrans
             BankingPermissions.Accounts.Read,
             BankingPermissions.Accounts.List,
             BankingPermissions.Accounts.Deposit,
+            BankingPermissions.Accounts.Transfer,
             BankingPermissions.Accounts.Withdraw,
             BankingPermissions.Accounts.Statement,
             BankingPermissions.Accounts.Summary,
@@ -66,13 +66,12 @@ public class BankingPermissionDataSeedContributor : IDataSeedContributor, ITrans
             BankingPermissions.Transactions.Read,
 
             BankingPermissions.Dashboard.Default,
-            BankingPermissions.Dashboard.Summary,
+            BankingPermissions.Dashboard.Summary
         };
 
         await _permissionDataSeeder.SeedAsync(
             providerName: RolePermissionValueProvider.ProviderName,
-            providerKey: adminRole.Id.ToString(),
-            grantedPermissions: permissions
-        );
+            providerKey: adminRole.Name!,
+            grantedPermissions: permissions);
     }
 }
