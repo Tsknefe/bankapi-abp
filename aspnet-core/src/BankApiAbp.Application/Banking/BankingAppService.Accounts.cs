@@ -621,6 +621,24 @@ public partial class BankingAppService
         activity?.SetTag("risk.code", risk.Code);
         activity?.SetTag("risk.score", risk.Score);
 
+        RiskEvaluationCounter.Add(1);
+        RiskScoreHistogram.Record(risk.Score);
+
+        if (risk.Decision == Risk.RiskDecision.Allow)
+        {
+            RiskAllowedCounter.Add(1);
+        }
+
+        if (risk.Decision == Risk.RiskDecision.Flag)
+        {
+            RiskFlaggedCounter.Add(1);
+        }
+
+        if (risk.Decision == Risk.RiskDecision.Block)
+        {
+            RiskBlockedCounter.Add(1);
+        }
+
         if (risk.Decision == Risk.RiskDecision.Block)
         {
             TransferFailureCounter.Add(1);
