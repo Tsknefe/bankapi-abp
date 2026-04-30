@@ -61,4 +61,19 @@ public partial class BankingAppService
 
     private static readonly Histogram<double> TransferDurationMs =
         Meter.CreateHistogram<double>("banking.transfer.duration.ms");
+
+        public static readonly Counter<long> RiskEvaluationCounter =
+        Meter.CreateCounter<long>("banking.risk.evaluations");
+
+        public static readonly Counter<long> RiskAllowedCounter =
+            Meter.CreateCounter<long>("banking.risk.allowed");
+
+        public static readonly Counter<long> RiskFlaggedCounter =
+            Meter.CreateCounter<long>("banking.risk.flagged");
+
+        public static readonly Counter<long> RiskBlockedCounter =
+            Meter.CreateCounter<long>("banking.risk.blocked");
+
+        public static readonly Histogram<int> RiskScoreHistogram =
+            Meter.CreateHistogram<int>("banking.risk.score");
 }

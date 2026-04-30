@@ -14,7 +14,7 @@ public class TransactionRiskEngine :
     ITransactionRiskEngine,
     ITransientDependency
 {
-    private const decimal DailyTransferLimit = 100_000m;
+    private const decimal DailyTransferLimit = 1_000_000m;
     private const decimal HighAmountThreshold = 50_000m;
     private const int VelocityWindowSeconds = 10;
     private const int VelocityMaxTransferCount = 3;
