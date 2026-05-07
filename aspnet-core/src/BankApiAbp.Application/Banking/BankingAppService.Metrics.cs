@@ -76,4 +76,40 @@ public partial class BankingAppService
 
         public static readonly Histogram<int> RiskScoreHistogram =
             Meter.CreateHistogram<int>("banking.risk.score");
+
+    private static readonly Counter<long> DebitCardSpendRequestCounter =
+Meter.CreateCounter<long>("banking.debit_card.spend.request");
+
+    private static readonly Counter<long> DebitCardSpendSuccessCounter =
+        Meter.CreateCounter<long>("banking.debit_card.spend.success");
+
+    private static readonly Counter<long> DebitCardSpendFailureCounter =
+        Meter.CreateCounter<long>("banking.debit_card.spend.failure");
+
+    private static readonly Histogram<double> DebitCardSpendDurationMs =
+        Meter.CreateHistogram<double>("banking.debit_card.spend.duration.ms");
+
+    private static readonly Counter<long> CreditCardSpendRequestCounter =
+        Meter.CreateCounter<long>("banking.credit_card.spend.request");
+
+    private static readonly Counter<long> CreditCardSpendSuccessCounter =
+        Meter.CreateCounter<long>("banking.credit_card.spend.success");
+
+    private static readonly Counter<long> CreditCardSpendFailureCounter =
+        Meter.CreateCounter<long>("banking.credit_card.spend.failure");
+
+    private static readonly Histogram<double> CreditCardSpendDurationMs =
+        Meter.CreateHistogram<double>("banking.credit_card.spend.duration.ms");
+
+    private static readonly Counter<long> CreditCardPaymentRequestCounter =
+        Meter.CreateCounter<long>("banking.credit_card.payment.request");
+
+    private static readonly Counter<long> CreditCardPaymentSuccessCounter =
+        Meter.CreateCounter<long>("banking.credit_card.payment.success");
+
+    private static readonly Counter<long> CreditCardPaymentFailureCounter =
+        Meter.CreateCounter<long>("banking.credit_card.payment.failure");
+
+    private static readonly Histogram<double> CreditCardPaymentDurationMs =
+        Meter.CreateHistogram<double>("banking.credit_card.payment.duration.ms");
 }

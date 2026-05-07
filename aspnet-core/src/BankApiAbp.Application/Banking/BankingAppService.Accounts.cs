@@ -658,7 +658,7 @@ public partial class BankingAppService
         try
         {
             _ = await GetAccountOwnedAsync(input.FromAccountId);
-            _ = await GetAccountOwnedAsync(input.ToAccountId);
+            _ = await _accounts.GetAsync(input.ToAccountId);
 
             var a = input.FromAccountId;
             var b = input.ToAccountId;
@@ -717,7 +717,6 @@ public partial class BankingAppService
                 dbSpan?.SetTag("to.balance.before", toAcc.Balance);
 
                 await EnsureAccountOwnedAsync(fromAcc.Id, ct);
-                await EnsureAccountOwnedAsync(toAcc.Id, ct);
 
                 if (fromAcc.Balance < input.Amount)
                 {

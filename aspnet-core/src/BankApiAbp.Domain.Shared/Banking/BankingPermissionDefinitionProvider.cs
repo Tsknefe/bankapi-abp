@@ -32,6 +32,8 @@ public class BankingPermissionDefinitionProvider : PermissionDefinitionProvider
         AddChildIfNotExists(group, debit, BankingPermissions.DebitCards.List, L("Permission:List"));
         AddChildIfNotExists(group, debit, BankingPermissions.DebitCards.Spend, L("Permission:Spend"));
         AddChildIfNotExists(group, debit, BankingPermissions.DebitCards.SpendSummary, L("Permission:SpendSummary"));
+        AddChildIfNotExists(group, debit, BankingPermissions.DebitCards.AdminList, L("Permission:DebitCards.AdminList"));
+
 
         var credit = GetOrAddPermission(group, BankingPermissions.CreditCards.Default, L("Permission:CreditCards"));
         AddChildIfNotExists(group, credit, BankingPermissions.CreditCards.Create, L("Permission:Create"));
@@ -40,6 +42,8 @@ public class BankingPermissionDefinitionProvider : PermissionDefinitionProvider
         AddChildIfNotExists(group, credit, BankingPermissions.CreditCards.Spend, L("Permission:Spend"));
         AddChildIfNotExists(group, credit, BankingPermissions.CreditCards.Pay, L("Permission:Pay"));
         AddChildIfNotExists(group, credit, BankingPermissions.CreditCards.SpendSummary, L("Permission:SpendSummary"));
+        AddChildIfNotExists(group, credit, BankingPermissions.CreditCards.AdminList, L("Permission:CreditCards.AdminList"));
+
 
         var tx = GetOrAddPermission(group, BankingPermissions.Transactions.Default, L("Permission:Transactions"));
         AddChildIfNotExists(group, tx, BankingPermissions.Transactions.List, L("Permission:List"));
