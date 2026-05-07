@@ -8,7 +8,7 @@ using Volo.Abp.DependencyInjection;
 using Volo.Abp.Identity;
 using Volo.Abp.PermissionManagement;
 using Volo.Abp.Uow;
-
+using BankApiAbp.Banking;
 namespace BankApiAbp.DbMigrator;
 
 public class TestUserPasswordSeeder : ITransientDependency
@@ -39,27 +39,30 @@ public class TestUserPasswordSeeder : ITransientDependency
             "admin",
             "admin@bankapi.local",
             "Admin123*",
-            adminRole.Name!);
+            adminRole.Name!,
+            isAdmin: true);
 
         await EnsureUserAsync(
             "test_basic",
             "test_basic@bankapi.local",
             "Admin123*",
-            adminRole.Name!);
+            adminRole.Name!,
+            isAdmin: false);
 
         await EnsureUserAsync(
             "test_ratelimit",
             "test_ratelimit@bankapi.local",
             "Admin123*",
-            adminRole.Name!);
+            adminRole.Name!,
+            isAdmin: false);
 
         await EnsureUserAsync(
             "test_concurrent",
             "test_concurrent@bankapi.local",
             "Admin123*",
-            adminRole.Name!);
+            adminRole.Name!,
+            isAdmin: false);
     }
-
     private async Task<IdentityRole> EnsureAdminRoleAsync()
     {
         var adminRole =
@@ -84,7 +87,8 @@ public class TestUserPasswordSeeder : ITransientDependency
         string username,
         string email,
         string password,
-        string roleName)
+        string roleName,
+        bool isAdmin)
     {
         var user =
             await _userManager.FindByNameAsync(username)
@@ -124,16 +128,47 @@ public class TestUserPasswordSeeder : ITransientDependency
         }
 
         var inRole = await _userManager.IsInRoleAsync(user, roleName);
-        if (!inRole)
-        {
-            var addRoleResult = await _userManager.AddToRoleAsync(user, roleName);
-            addRoleResult.Succeeded.Should().BeTrue(
-                string.Join(" | ", addRoleResult.Errors.Select(x => $"{x.Code}:{x.Description}")));
-        }
 
-        await _permissionDataSeeder.SeedAsync(
-            RolePermissionValueProvider.ProviderName,
-            user.Id.ToString(),
-            Array.Empty<string>());
+        if (isAdmin)
+        {
+            if (!inRole)
+            {
+                var addRoleResult = await _userManager.AddToRoleAsync(user, roleName);
+                addRoleResult.Succeeded.Should().BeTrue(
+                    string.Join(" | ", addRoleResult.Errors.Select(x => $"{x.Code}:{x.Description}")));
+            }
+
+            await _permissionDataSeeder.SeedAsync(
+                UserPermissionValueProvider.ProviderName,
+                user.Id.ToString(),
+                new[]
+                {
+                    BankingPermissions.CreditCards.AdminList,
+                    BankingPermissions.DebitCards.AdminList,
+
+                    BankingPermissions.DebitCards.List,
+                    BankingPermissions.DebitCards.Read,
+                    BankingPermissions.CreditCards.List,
+                    BankingPermissions.CreditCards.Read
+                });
+        }
+        else
+        {
+            await _permissionDataSeeder.SeedAsync(
+                UserPermissionValueProvider.ProviderName,
+                user.Id.ToString(),
+                new[]
+                {
+                    BankingPermissions.DebitCards.List,
+                    BankingPermissions.DebitCards.Read,
+                    BankingPermissions.DebitCards.Spend,
+                    BankingPermissions.DebitCards.SpendSummary,
+
+                    BankingPermissions.CreditCards.List,
+                    BankingPermissions.CreditCards.Read,
+                    BankingPermissions.CreditCards.Spend,
+                    BankingPermissions.CreditCards.Pay,
+                    BankingPermissions.CreditCards.SpendSummary                });
+        }
     }
 }

@@ -11,7 +11,7 @@ using BankApiAbp.Entities;
 using BankApiAbp.Banking;
 using BankApiAbp.TestData;
 using Microsoft.AspNetCore.Identity;
-
+using BankApiAbp.Cards;
 namespace BankApiAbp.Data;
 
 public class BankingTestDataSeedContributor : IDataSeedContributor, ITransientDependency
@@ -22,6 +22,8 @@ public class BankingTestDataSeedContributor : IDataSeedContributor, ITransientDe
     private readonly IRepository<Customer, Guid> _customerRepository;
     private readonly IRepository<Account, Guid> _accountRepository;
     private readonly ILogger<BankingTestDataSeedContributor> _logger;
+    private readonly IRepository<CreditCard, Guid> _creditCardRepository;
+    private readonly IRepository<DebitCard, Guid> _debitCardRepository;
 
     public BankingTestDataSeedContributor(
         IIdentityUserRepository userRepository,
@@ -29,7 +31,9 @@ public class BankingTestDataSeedContributor : IDataSeedContributor, ITransientDe
         IIdentityRoleRepository roleRepository,
         IRepository<Customer, Guid> customerRepository,
         IRepository<Account, Guid> accountRepository,
-        ILogger<BankingTestDataSeedContributor> logger)
+        ILogger<BankingTestDataSeedContributor> logger,
+        IRepository<CreditCard, Guid> creditCardRepository,
+        IRepository<DebitCard, Guid> debitCardRepository)
     {
         _userRepository = userRepository;
         _userManager = userManager;
@@ -37,6 +41,8 @@ public class BankingTestDataSeedContributor : IDataSeedContributor, ITransientDe
         _customerRepository = customerRepository;
         _accountRepository = accountRepository;
         _logger = logger;
+        _creditCardRepository = creditCardRepository;
+        _debitCardRepository = debitCardRepository;
     }
 
     public async Task SeedAsync(DataSeedContext context)
@@ -134,7 +140,7 @@ public class BankingTestDataSeedContributor : IDataSeedContributor, ITransientDe
             _logger.LogInformation("Test user created: {Username}", username);
         }
 
-        await EnsureAdminRoleAsync(user);
+       // await EnsureAdminRoleAsync(user);
 
         var customer = await _customerRepository.FirstOrDefaultAsync(x => x.Id == customerId);
         if (customer == null)
@@ -167,6 +173,22 @@ public class BankingTestDataSeedContributor : IDataSeedContributor, ITransientDe
             accountName: accountBName,
             iban: ibanB,
             initialBalance: initialBalanceB
+        );
+
+        await EnsureCreditCardAsync(
+            customerId,
+            $"400000000000{Math.Abs(customerId.GetHashCode()) % 10000:D4}",
+            DateTime.UtcNow.AddYears(3),
+            "123",
+            10000m
+        );
+
+        await EnsureDebitCardAsync(
+            accountAId,
+            $"500000000000{Math.Abs(accountAId.GetHashCode()) % 10000:D4}",
+            DateTime.UtcNow.AddYears(3),
+            "123",
+            5000m
         );
     }
 
@@ -214,5 +236,60 @@ public class BankingTestDataSeedContributor : IDataSeedContributor, ITransientDe
         await _accountRepository.InsertAsync(account, autoSave: true);
 
         _logger.LogInformation("Test account created: {Iban}", iban);
+
+
+    }
+    private async Task EnsureCreditCardAsync(
+    Guid customerId,
+    string cardNo,
+    DateTime expireAt,
+    string cvv,
+    decimal limit)
+    {
+        var existing = await _creditCardRepository.FirstOrDefaultAsync(x => x.CardNo == cardNo);
+        if (existing != null)
+        {
+            return;
+        }
+
+        var card = new CreditCard(
+            Guid.NewGuid(),
+            customerId,
+            cardNo,
+            expireAt,
+            cvv,
+            limit
+        );
+
+        await _creditCardRepository.InsertAsync(card, autoSave: true);
+
+        _logger.LogInformation("Test credit card created: {CardNo}", cardNo);
+    }
+
+    private async Task EnsureDebitCardAsync(
+        Guid accountId,
+        string cardNo,
+        DateTime expireAt,
+        string cvv,
+        decimal dailyLimit)
+    {
+        var existing = await _debitCardRepository.FirstOrDefaultAsync(x => x.CardNo == cardNo);
+        if (existing != null)
+        {
+            return;
+        }
+
+        var card = new DebitCard(
+            Guid.NewGuid(),
+            accountId,
+            cardNo,
+            expireAt,
+            cvv,
+            dailyLimit
+        );
+
+        await _debitCardRepository.InsertAsync(card, autoSave: true);
+
+        _logger.LogInformation("Test debit card created: {CardNo}", cardNo);
     }
 }

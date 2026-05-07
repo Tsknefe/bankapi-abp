@@ -33,6 +33,7 @@ public static class BankingPermissions
         public const string List = Default + ".List";
         public const string Spend = Default + ".Spend";
         public const string SpendSummary = Default + ".SpendSummary";
+        public const string AdminList = GroupName + ".DebitCards.AdminList";
     }
 
     public static class CreditCards
@@ -44,6 +45,7 @@ public static class BankingPermissions
         public const string Spend = Default + ".Spend";
         public const string Pay = Default + ".Pay";
         public const string SpendSummary = Default + ".SpendSummary";
+        public const string AdminList = GroupName + ".CreditCards.AdminList";
     }
 
     public static class Transactions

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using BankApiAbp.Banking.Dtos;
@@ -51,6 +52,9 @@ public partial class BankingAppService
     [Authorize(BankingPermissions.CreditCards.Spend)]
     public async Task CreditCardSpendAsync(CardSpendDto input)
     {
+        var startedAt = Stopwatch.GetTimestamp();
+        CreditCardSpendRequestCounter.Add(1);
+
         var userId = CurrentUserIdOrThrow();
         var operation = "creditcards.spend";
         var key = GetIdempotencyKeyOrThrow(operation);
@@ -104,7 +108,14 @@ public partial class BankingAppService
                 ), autoSave: true);
             });
 
-            await _idem.CompleteAsync(record, new { Ok = true }, 204); 
+            await _idem.CompleteAsync(record, new { Ok = true }, 204);
+
+            CreditCardSpendSuccessCounter.Add(1);
+
+            CreditCardSpendDurationMs.Record(
+                Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds
+            );
+
         }
         catch (Exception ex)
         {
@@ -117,6 +128,10 @@ public partial class BankingAppService
     [Authorize(BankingPermissions.CreditCards.Pay)]
     public async Task CreditCardPayAsync(CreditCardPayDto input)
     {
+        var startedAt = Stopwatch.GetTimestamp();
+
+        CreditCardPaymentRequestCounter.Add(1);
+
         var userId = CurrentUserIdOrThrow();
         var operation = "creditcards.pay";
         var key = GetIdempotencyKeyOrThrow(operation);
@@ -192,6 +207,13 @@ public partial class BankingAppService
             });
 
             await _idem.CompleteAsync(record, new { Ok = true }, 204);
+
+            CreditCardPaymentSuccessCounter.Add(1);
+
+            CreditCardPaymentDurationMs.Record(
+                Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds
+            );
+
         }
         catch (Exception ex)
         {
@@ -281,6 +303,44 @@ public partial class BankingAppService
         q = q.OrderBy(x => x.CardNo);
 
         var items = await AsyncExecuter.ToListAsync(q.Skip(input.SkipCount).Take(input.MaxResultCount));
+
+        return new PagedResultDto<CreditCardListItemDto>(
+            total,
+            items.Select(cc => new CreditCardListItemDto
+            {
+                Id = cc.Id,
+                CustomerId = cc.CustomerId,
+                CardNo = cc.CardNo,
+                ExpireAt = cc.ExpireAt,
+                Limit = cc.Limit,
+                CurrentDebt = cc.CurrentDebt,
+                IsActive = cc.IsActive
+            }).ToList()
+        );
+    }
+    [Authorize(BankingPermissions.CreditCards.AdminList)]
+    public async Task<PagedResultDto<CreditCardListItemDto>> GetAllCreditCardsForAdminAsync(MyCreditCardsInput input)
+    {
+        var creditCardsQ = await _creditCards.GetQueryableAsync();
+
+        var q = creditCardsQ;
+
+        if (input.CustomerId.HasValue)
+            q = q.Where(cc => cc.CustomerId == input.CustomerId.Value);
+
+        if (!string.IsNullOrWhiteSpace(input.CardNo))
+        {
+            var cn = NormalizeCardNo(input.CardNo);
+            q = q.Where(cc => cc.CardNo == cn);
+        }
+
+        var total = await AsyncExecuter.CountAsync(q);
+
+        q = q.OrderBy(x => x.CardNo);
+
+        var items = await AsyncExecuter.ToListAsync(
+            q.Skip(input.SkipCount).Take(input.MaxResultCount)
+        );
 
         return new PagedResultDto<CreditCardListItemDto>(
             total,

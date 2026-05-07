@@ -270,6 +270,8 @@ public class TestDataSeeder : ITransientDependency
             BankingPermissions.DebitCards.List,
             BankingPermissions.DebitCards.Spend,
             BankingPermissions.DebitCards.SpendSummary,
+            BankingPermissions.DebitCards.AdminList,
+
 
             BankingPermissions.CreditCards.Default,
             BankingPermissions.CreditCards.Create,
@@ -278,6 +280,7 @@ public class TestDataSeeder : ITransientDependency
             BankingPermissions.CreditCards.Spend,
             BankingPermissions.CreditCards.Pay,
             BankingPermissions.CreditCards.SpendSummary,
+            BankingPermissions.CreditCards.AdminList,
 
             BankingPermissions.Transactions.Default,
             BankingPermissions.Transactions.List,

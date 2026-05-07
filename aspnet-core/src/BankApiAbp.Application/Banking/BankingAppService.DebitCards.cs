@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using BankApiAbp.Banking.Dtos;
@@ -52,6 +53,9 @@ public partial class BankingAppService
     [Authorize(BankingPermissions.DebitCards.Spend)]
     public async Task DebitCardSpendAsync(CardSpendDto input)
     {
+        var startedAt = Stopwatch.GetTimestamp();
+        DebitCardSpendRequestCounter.Add(1);
+
         var userId = CurrentUserIdOrThrow();
         var operation = "debitcards.spend";
         var key = GetIdempotencyKeyOrThrow(operation);
@@ -127,9 +131,20 @@ public partial class BankingAppService
             });
 
             await _idem.CompleteAsync(record, new { Ok = true }, 204);
+
+            DebitCardSpendSuccessCounter.Add(1);
+
+            DebitCardSpendDurationMs.Record(
+                Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
         }
         catch (Exception ex)
         {
+            DebitCardSpendFailureCounter.Add(1);
+
+            DebitCardSpendDurationMs.Record(
+                Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds
+            );
+
             await _idem.FailAsync(record, ex);
             throw;
         }
@@ -200,6 +215,43 @@ public partial class BankingAppService
         q = q.OrderBy(x => x.CardNo);
 
         var items = await AsyncExecuter.ToListAsync(q.Skip(input.SkipCount).Take(input.MaxResultCount));
+
+        return new PagedResultDto<DebitCardListItemDto>(
+            total,
+            items.Select(dc => new DebitCardListItemDto
+            {
+                Id = dc.Id,
+                AccountId = dc.AccountId,
+                CardNo = dc.CardNo,
+                ExpireAt = dc.ExpireAt,
+                DailyLimit = dc.DailyLimit,
+                IsActive = dc.IsActive
+            }).ToList()
+        );
+    }
+    [Authorize(BankingPermissions.DebitCards.AdminList)]
+    public async Task<PagedResultDto<DebitCardListItemDto>> GetAllDebitCardsForAdminAsync(MyDebitCardsInput input)
+    {
+        var debitCardsQ = await _debitCards.GetQueryableAsync();
+
+        var q = debitCardsQ;
+
+        if (input.AccountId.HasValue)
+            q = q.Where(dc => dc.AccountId == input.AccountId.Value);
+
+        if (!string.IsNullOrWhiteSpace(input.CardNo))
+        {
+            var cn = NormalizeCardNo(input.CardNo);
+            q = q.Where(dc => dc.CardNo == cn);
+        }
+
+        var total = await AsyncExecuter.CountAsync(q);
+
+        q = q.OrderBy(x => x.CardNo);
+
+        var items = await AsyncExecuter.ToListAsync(
+            q.Skip(input.SkipCount).Take(input.MaxResultCount)
+        );
 
         return new PagedResultDto<DebitCardListItemDto>(
             total,
